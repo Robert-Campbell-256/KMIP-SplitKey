@@ -5,7 +5,7 @@
 # Implementing the 8-bit (later 16-bit, and eventually prime field) Shamir sharing
 # mechanism as specified in the KMIP v2.0 protocol.
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
-# Date: 17 Aug 2019
+# Date: 21 Aug 2019
 # Version 0.1
 # License: Simplified BSD (see details at bottom)
 ######################################################################################
@@ -42,8 +42,8 @@ Usage:  Implement a 3-of-7 KeySplit over GF(2^8)
     """
 
 
-__version__ = '0.1' # Format specified in Python PEP 396
-Version = 'shamirshare.py, version ' + __version__ + ', 18 Aug, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
+__version__ = '0.11' # Format specified in Python PEP 396
+Version = 'shamirshare.py, version ' + __version__ + ', 21 Aug, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
 
 import random
 import sys     # Check Python2 or Python3
@@ -146,7 +146,7 @@ class GF8AESelt(object):
             return self.add(summand)
         elif isinstance(summand,(PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
             return summand.__add__(self)
-        else: raise NotImplementedError("Can't add GF8AESelt object to {0:} object".format(type(multip)))
+        else: raise NotImplementedError("Can't add GF8AESelt object to {0:} object".format(type(summand)))
 
     def __radd__(self,summand):  # Overload the "+" operator when first addend can be coerced to GF8AESelt
         return self.__add__(summand)  # Because addition is commutative
@@ -320,10 +320,10 @@ class PolyFieldUniv(object):
     def __call__(self,elts):  # Coerce constant or array of coeffs as elt of poly ring
         if isinstance(elts,PolyFieldUnivElt): # Handle unnecessary coercion
             return elts
-        elif isListType(coeffs):              # List or Sequence
+        elif isListType(elts):              # List or Sequence
             return PolyFieldUnivElt(self,list(map(self.coeffring,elts)))
-        elif isIntType(coeffs) or isStrType(coeffs):       # Overload int/string --> constant poly
-            self.coeffs = [self.coeffring(coeffs)]
+        elif isIntType(elts) or isStrType(elts):       # Overload int/string --> constant poly
+            self.coeffs = [self.coeffring(elts)]
         else:
             return PolyFieldUnivElt(self,[self.coeffring(elts)]) # Coerce coeff as constant poly
 
