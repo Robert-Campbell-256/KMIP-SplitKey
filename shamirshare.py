@@ -6,7 +6,7 @@
 # mechanism as specified in the KMIP v2.0 protocol.
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
 # Date: 21 Aug 2019
-# Version 0.1
+# Version 0.11
 # License: Simplified BSD (see details at bottom)
 ######################################################################################
 
