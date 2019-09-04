@@ -1,29 +1,30 @@
-######################################################################################
+###############################################################################
 # SHAMIRSHARE.py
 # The Shamir Key Share scheme, implemented over the finite fields
-# GF8 (as featured in AES) and GF16, implemented as a quadratic extension of GF8
-# Implementing the 8-bit (later 16-bit, and eventually prime field) Shamir sharing
-# mechanism as specified in the KMIP v2.0 protocol.
+# GF8 (as featured in AES) and GF16, a quadratic extension of GF8
+# Implement Shamir Secret Sharing mechanism over 8-bit, 16-bit,
+# and prime fields as specified in the KMIP v2.0 protocol.
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
-# Date: 21 Aug 2019
-# Version 0.11
+# Date: 4 Sept 2019
+# Version 0.2
 # License: Simplified BSD (see details at bottom)
-######################################################################################
+###############################################################################
 
-"""Code to perform a Shamir Secret Sharing split of a secret, as called for in KMIP v2.0.
+"""Code to perform a Shamir Secret Sharing split of a secret, as in KMIP v2.0.
 Possible ground fields include:
-    GF(2^8) - as used by GF8AES
-    GF(2^16) - a quadratic extension of the first (not yet implemented)
-    GF(p) - for a specified prime p (not yet implemented)
+    GF(2^8) - GF8, as used by AES
+    GF(2^16) - GF16, a quadratic extension of the first (not yet implemented)
+    GF(p) - GFp, for a specified prime p (not yet implemented)
 Usage:  Implement a 3-of-7 KeySplit over GF(2^8)
         >>> from shamirshare import *
-        >>> GF8x = PolyFieldUniv()                        # Uses default field GF(2^8)
+        >>> gf8 = GF8()                      # Create the field GF(2^8)
+        >>> GF8x = PolyFieldUniv(gf8)        # Ring of polynomials over GF(2^8)
         ################### Create a new key/secret and split it
         >>> [(i,"{0:02x}".format(random.randint(0,256))) for i in range(1,4)] # Choose random splits
             [(1, '45'), (2, '41'), (3, 'c3')]
         >>> pfit = GF8x.fit(((1, '45'), (2, '41'), (3, 'c3'))); format(pfit)
             '[c7, 34, b6, ]'
-        # So the polynomial is ('c7' + '34'*x + 'c3'*x^2), and the split secret is pfit(0) = 'c7'
+        # So poly is ('c7' + '34'*x + 'c3'*x^2), and secret is pfit(0) = 'c7'
         # Now generate four more splits for users 4, 5, 6, and 7
         >>> [format(pfit(i)) for i in range(4,8)]
             ['82', '00', '04', '86']
@@ -39,81 +40,124 @@ Usage:  Implement a 3-of-7 KeySplit over GF(2^8)
         # Now generate splits for users 3, 4, 5, 6, and 7
         >>> [(i, format(pfit(i))) for i in range(3,8)]
             [(3, 'af'), (4, 'd0'), (5, '3e'), (6, '3a'), (7, 'd4')]
+Usage:  Implement a 4-of-5 KeySplit over GFp(13)
+        >>> gf13 = shamirshare.GFp(13)
+        >>> GFp13x = shamirshare.PolyFieldUniv(gf13)
+        >>> pfit13 = GFp13x.fit(((1,3),(2,6),(3,-2),(4,0))); format(pfit13)
+            '[7, 6, 6, 10, ]'
+        >>> print(pfit13(5))   # The additional split for user #5
+            7
+        >>> print(pfit13(0))   # The resulting split secret
+            7
     """
 
-
-__version__ = '0.11' # Format specified in Python PEP 396
-Version = 'shamirshare.py, version ' + __version__ + ', 21 Aug, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
+__version__ = '0.2'  # Format specified in Python PEP 396
+Version = 'shamirshare.py, version ' + __version__ + ', 4 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
 
 import random
 import sys     # Check Python2 or Python3
+
 
 def isStrType(x):
     if sys.version_info < (3,): return isinstance(x,(basestring,))
     else: return isinstance(x,(str,))
 
+
 def isIntType(x):
-    if sys.version_info < (3,): return isinstance(x,(int, long,))
-    else: return isinstance(x,(int,))
+    if sys.version_info < (3,): return isinstance(x, (int, long,))
+    else: return isinstance(x, (int,))
+
 
 def isListType(x):    # List or Tuple: [1,2] or (1,2)
-    return isinstance(x,(list, tuple,))
+    return isinstance(x, (list, tuple,))
 
-############################# Class GF8AESelt #######################################
-# Class GF8AESelt
-# Elements of the finite field GF8AES = GF(2^8) = GF(2)[x]/<x^8 + x^4 + x^3 + x + 1>,
+
+############################# Class GF8elt #################################
+# Class GF8
+# A singleton class implementing the finite field GF8, as used in AES,
+#   GF8 = GF(2^8) = GF(2)[x]/<x^8 + x^4 + x^3 + x + 1>, with the driving
+#   (non-primitive) primitive polynomial x^8 + x^4 + x^3 + x + 1, aka "1b"
+#   Elements of GF8 are instances of GF8elt.
+#   (Defining this field as a class is not directly needed, but makes code
+#   which is templated over GF8, GF16 and various GFp easier)
+
+class GF8(object):
+    """The finite field GF(2^8), as represented in AES
+    (driving polynomial x^8 + x^4 + x^3 + x + 1, aka "1b")
+    """
+
+    instance = None
+
+    def __new__(cls):
+        if cls.instance is None:
+            cls.instance = super().__new__(cls)
+        return cls.instance
+
+    def __contains__(self, elt):
+        return isinstance(elt, (GF8elt,))
+
+    def __call__(self, thevalue):
+        return(GF8elt(thevalue))
+
+    def __format__(self, fmtspec):  # Over-ride format conversion
+        return "Finite field GF(2^8) mod (x^8 + x^4 + x^3 + x + 1)"
+
+
+############################# Class GF8elt #################################
+# Class GF8elt
+# Elements of the finite field GF8 = GF(2^8) = GF(2)[x]/<x^8 + x^4 + x^3 + x + 1>,
 #   with the driving (non-primitive) primitive polynomial x^8 + x^4 + x^3 + x + 1, aka "1b",
 #   the representation of GF(2^8) used in the construction of the AES block cipher.
-#####################################################################################
 
-class GF8AESelt(object):
-    """An element of GF(2^8) as represented in AES (driving polynomial x^8 + x^4 + x^3 + x + 1, aka "1b")
+class GF8elt(object):
+    """An element of GF(2^8) as represented in AES
+    (driving polynomial x^8 + x^4 + x^3 + x + 1, aka "1b")
     Usage:
         >>> from shamirshare import *
-        >>> a = GF8AESelt(123)              # Note that decimal '123' is hex 0x7b
-        >>> a                               # Full representation
-            <GF8AESelt object at 0x7f8daa662e80>
-        >>> "{0:x}".format(a)               # Hex format
+        >>> a = GF8elt(123)            # Note that decimal '123' is hex 0x7b
+        >>> a                             # Full representation
+            <GF8elt object at 0x7f8daa662e80>
+        >>> "{0:x}".format(a)             # Hex format
             '7b'
-        >>> b = GF8AESelt('f5')
-        >>> "{0:b}".format(a+b)             # Add, output binary: 0x7b xor 0xf5 = 0x8e = 0b10001110
+        >>> b = GF8elt('f5')
+        >>> "{0:b}".format(a+b)           # Add, output binary: 0x7b xor 0xf5 = 0x8e = 0b10001110
             '10001110'
     """
 
     fmtspec = 'x'  # Default format for GF8 is two hex digits
 
     def __init__(self, value):
-        if isinstance(value,(GF8AESelt,)): self.value = value.value # strip redundant GF8AESelt
+        if isinstance(value, (GF8elt,)): self.value = value.value  # strip redundant GF8elt
         if isinstance(value, (int,)): self.value = value
-        elif isStrType(value): self.value = int(value,16) # For the moment, assume hex
+        elif isStrType(value): self.value = int(value,16)  # For the moment, assume hex
 
-    def __eq__(self,other): # Implement for both Python2 and Python3 with overloading
+    def __eq__(self, other):  # Implement for both Python2 & 3 with overloading
         if isIntType(other): otherval = other
-        elif isStrType(other): otherval = int(other,16)
-        elif isinstance(other,(GF8AESelt,)): otherval = other.value
+        elif isStrType(other): otherval = int(other, 16)
+        elif isinstance(other, (GF8elt,)): otherval = other.value
         return self.value == otherval
 
-    def __ne__(self,other): # Implement for both Python2 and Python3 with overloading
+    def __ne__(self, other):  # Implement for both Python2 & 3 with overloading
         if isIntType(other): otherval = other
-        elif isStrType(other): otherval = int(other,16)
-        elif isinstance(other,(GF8AESelt,)): otherval = other.value
+        elif isStrType(other): otherval = int(other, 16)
+        elif isinstance(other, (GF8elt,)): otherval = other.value
         return self.value != otherval
 
-    ######################## Format Operators ########################################
+    ######################## Format Operators #################################
 
-    def __format__(self,fmtspec):  # Over-ride format conversion
-        """Override the format when outputting a GF8AES element.
-        A default can be set for the field is defined or it can be specified for each output.
+    def __format__(self, fmtspec):  # Over-ride format conversion
+        """Override the format when outputting a GF8 element.
+        A default can be set for the field or specified for each output.
         Possible formats are:
             b- coefficients as a binary integer
             x- coefficients as a hex integer
         Example:
-            >>> a = GF8AESelt([1,1,0,1,1,1])
+            >>> a = GF8elt([1,1,0,1,1,1])
             >>> "{0:x}".format(a)
             '37'
             >>> "{0:b}".format(a)
             '00110111'"""
-        if fmtspec == '': fmtspec = GF8AESelt.fmtspec  # Default format is hex
+        if fmtspec == '': fmtspec = GF8elt.fmtspec  # Default format is hex
         if fmtspec == 'x': return "{0:02x}".format(self.value)
         if fmtspec == 'b': return "{0:08b}".format(self.value)
 
@@ -131,79 +175,79 @@ class GF8AESelt(object):
 
     if sys.version_info < (3,):  # Overload hex() and oct() (bin() was never backported to Python 2)
         def __hex__(self): return "0x{0:02x}".format(self.value)
-        def __oct__(self): return hex(self.__index__())
+        def __oct__(self): return oct(self.__index__())
 
-    ######################## Addition Operators ######################################
+    ######################## Addition Operators ###############################
 
-    def add(self,summand):
-        """add elements of GF8AESelt (overloaded to allow adding integers and lists of integers)"""
-        return GF8AESelt(self.value ^ GF8AESelt(summand.value).value)
-
-    def __add__(self,summand):   # Overload the "+" operator
-        if isinstance(summand,(int,)) or isStrType(summand): # Coerce if adding integer or string and GF8AESelt
-            return self.add(GF8AESelt(summand))
-        elif isinstance(summand,(GF8AESelt,)):
-            return self.add(summand)
-        elif isinstance(summand,(PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
+    def add(self, summand):
+        """add elements of GF8elt (overloaded to allow adding integers and lists of integers)"""
+        if isinstance(summand, (int,)) or isStrType(summand):  # Coerce if adding integer or string and GF8elt
+            summand = GF8elt(summand)
+        elif isinstance(summand, (PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
             return summand.__add__(self)
-        else: raise NotImplementedError("Can't add GF8AESelt object to {0:} object".format(type(summand)))
+        elif not isinstance(summand, (GF8elt,)):
+            raise NotImplementedError("Can't add GF8elt object to {0:} object".format(type(summand)))
+        return GF8elt(self.value ^ GF8elt(summand.value).value)
 
-    def __radd__(self,summand):  # Overload the "+" operator when first addend can be coerced to GF8AESelt
-        return self.__add__(summand)  # Because addition is commutative
+    def __add__(self, summand):   # Overload the "+" operator
+        return self.add(summand)
 
-    def __iadd__(self,summand): # Overload the "+=" operator
+    def __radd__(self, summand):  # Overload the "+" operator when first addend can be coerced to GF8elt
+        return self.add(summand)  # Because addition is commutative
+
+    def __iadd__(self, summand):  # Overload the "+=" operator
+        self = self.add(summand)
+        return self
+
+    def __neg__(self):  # Overload "-" unary operator (no sense over GF(2))
+        return self
+
+    def __sub__(self, summand):  # Overload the "-" binary operator
+        return self.add(summand)
+
+    def __isub__(self, summand):  # Overload the "-=" operator
         self = self + summand
         return self
 
-    def __neg__(self):  # Overload the "-" unary operator (makes no sense over GF(2) - true)
-        return self
+    ######################## Multiplication Operators #########################
 
-    def __sub__(self,summand):  # Overload the "-" binary operator
-        return self.__add__(summand)
-
-    def __isub__(self,summand): # Overload the "-=" operator
-        self = self + summand
-        return self
-
-    ######################## Multiplication Operators ################################
-
-    def mul(self,multand):  # Elementary multiplication in finite fields
-        """multiply elements of GF8AES (overloaded to allow integers and lists of integers)"""
-        amult = self.value     # Pull it out of the GF8AESelt structure
-        bmult = multand.value  # Pull it out of the GF8AESelt structure
+    def mul(self, multand):  # Elementary multiplication in finite fields
+        """multiply elements of GF8 (overloaded to allow integers and lists of integers)"""
+        amult = self.value     # Pull it out of the GF8elt structure
+        bmult = multand.value  # Pull it out of the GF8elt structure
         thenum = 0
         # Multiply as binary polynomials
-        for i in range(8): thenum ^= ((bmult<<i) if ((amult >> i) & 0x01) == 1 else 0)
-        # And then reduce mod the driving polynomial of GF8AES
-        return GF8AESelt(GF8AESelt.__reducegf8aes(thenum))
+        for i in range(8): thenum ^= ((bmult << i) if ((amult >> i) & 0x01) == 1 else 0)
+        # And then reduce mod the driving polynomial of GF8
+        return GF8elt(GF8elt.__reduceGF8(thenum))
 
-    def __mul__(self,multip):  # Overload the "*" operator
-        if isinstance(multip,(int,)) or isStrType(multip): # Coerce if multiplying integer or string and GF8AESelt
-            return self.mul(GF8AESelt(multip))
-        elif isinstance(multip,(GF8AESelt,)):
+    def __mul__(self, multip):  # Overload the "*" operator
+        if isinstance(multip, (int,)) or isStrType(multip):  # Coerce if multiplying integer or string and GF8elt
+            return self.mul(GF8elt(multip))
+        elif isinstance(multip, (GF8elt,)):
             return self.mul(multip)
-        elif isinstance(multip,(PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
+        elif isinstance(multip, (PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
             return multip.__mul__(self)
-        else: raise NotImplementedError("Can't multiply GF8AESelt object with {0:} object".format(type(multip)))
+        else: raise NotImplementedError("Can't multiply GF8elt object with {0:} object".format(type(multip)))
 
-    def __rmul__(self,multip):  # Overload the "*" operator when first multiplicand can be coerced to GF8AESelt
+    def __rmul__(self, multip):  # Overload the "*" operator when first multiplicand can be coerced to GF8elt
         return self.__mul__(multip)  # Because multiplication is commutative
 
-    def __imul__(self,multip): # Overload the "*=" operator
+    def __imul__(self, multip):  # Overload the "*=" operator
         self = self * multip
         return self
 
     @staticmethod
-    def __reducegf8aes(thevalue): # Value is integer in range [0,2^16-1]
+    def __reduceGF8(thevalue):  # Value is integer in range [0,2^16-1]
         reductable = (0x1b, 0x36, 0x6c, 0xd8, 0xab, 0x4d, 0x9a, 0x2f)
         feedback = 0
-        for i in range(8,16): feedback ^= (reductable[i-8] if (((thevalue >> i) & 0x01) == 1)  else 0)
+        for i in range(8, 16): feedback ^= (reductable[i-8] if (((thevalue >> i) & 0x01) == 1) else 0)
         return ((thevalue & 0xff) ^ feedback)
 
-    ######################## Division Operators ######################################
+    ######################## Division Operators ###############################
 
     # Table based inverse (well, actually pseudo-inverse, as 00-->00)
-    __gf8aesinv = {
+    __GF8inv = {
          "00":"00","01":"01","02":"8d","03":"f6","04":"cb","05":"52","06":"7b","07":"d1",
          "08":"e8","09":"4f","0a":"29","0b":"c0","0c":"b0","0d":"e1","0e":"e5","0f":"c7",
          "10":"74","11":"b4","12":"aa","13":"4b","14":"99","15":"2b","16":"60","17":"5f",
@@ -239,95 +283,330 @@ class GF8AESelt(object):
         }
 
     def inv(self):
-        """inverse of element in GF8AES"""
-        if (self.value == 0): raise ZeroDivisionError("Attempting to invert zero element of GF8AES")
-        # Tableized (lazy solution for a small field, better solution would be xgcd
-        return GF8AESelt(GF8AESelt.__gf8aesinv[str(self)])
+        """inverse of element in GF8"""
+        if (self.value == 0): raise ZeroDivisionError("Attempting to invert zero element of GF8")
+        # Tableized (lazy solution for a small field, xgcd is better solution)
+        return GF8elt(GF8elt.__GF8inv[str(self)])
 
-    def div(self,divisor):
-        """divide elements of GF8AES"""
+    def div(self, divisor):
+        """divide elements of GF8"""
         return self * divisor.inv()
 
-    def __div__(self,divisor):  # Overload the "/" operator in Python2
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
-            divisor = GF8AESelt(divisor)
+    def __div__(self, divisor):  # Overload the "/" operator in Python2
+        if isinstance(divisor, (int,)) or isStrType(divisor):  # Coerce if dividing by integer or string
+            divisor = GF8elt(divisor)
         return self * divisor.inv()
 
-    def __truediv__(self,divisor):  # Overload the "/" operator in Python3
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
-            divisor = GF8AESelt(divisor)
+    def __truediv__(self, divisor):  # Overload the "/" operator in Python3
+        if isinstance(divisor, (int,)) or isStrType(divisor):  # Coerce if dividing by integer or string
+            divisor = GF8elt(divisor)
         return self * divisor.inv()
 
-    # As GF8AES is a field, there is no real need for floordiv, but include it
+    # As GF8 is a field, there is no real need for floordiv, but include it
     # as someone will try "//" in any event - if only in error
 
-    def __floordiv__(self,divisor):  # Overload the "//" operator in Python2 and Python3
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
-            divisor = GF8AESelt(divisor)
+    def __floordiv__(self, divisor):  # Overload "//" operator in Python 2 & 3
+        if isinstance(divisor, (int,)) or isStrType(divisor):  # Coerce if dividing by integer or string
+            divisor = GF8elt(divisor)
         return self * divisor.inv()
 
-    def __rdiv__(self,dividend):
-        if isinstance(dividend,(int,)) or isStrType(dividend): # Coerce if dividing integer or string
-            dividend = GF8AESelt(dividend)
+    def __rdiv__(self, dividend):
+        if isinstance(dividend, (int,)) or isStrType(dividend):  # Coerce if dividing integer or string
+            dividend = GF8elt(dividend)
         return dividend * self.inv()
 
-    def __rtruediv__(self,dividend):  # Overload the "/" operator in Python3
-        if isinstance(dividend,(int,)) or isStrType(dividend): # Coerce if dividing by integer or string
-            dividend = GF8AESelt(dividend)
+    def __rtruediv__(self, dividend):  # Overload the "/" operator in Python3
+        if isinstance(dividend, (int,)) or isStrType(dividend):  # Coerce if dividing by integer or string
+            dividend = GF8elt(dividend)
         return dividend * self.inv()
 
-    def __rfloordiv__(self,dividend):  # Overload the "//" operator in Python2 and Python3
-        if isinstance(dividend,(int,)) or isStrType(dividend): # Coerce if dividing by integer or string
-            dividend = GF8AESelt(dividend)
+    def __rfloordiv__(self, dividend):  # Overload "//" operator in Python2 & 3
+        if isinstance(dividend, (int,)) or isStrType(dividend):  # Coerce if dividing by integer or string
+            dividend = GF8elt(dividend)
         return dividend * self.inv()
 
-    def __idiv__(self,divisor):  # Overload the "/=" operator in Python2
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
-            divisor = GF8AESelt(divisor)
+    def __idiv__(self, divisor):  # Overload the "/=" operator in Python2
+        if isinstance(divisor, (int,)) or isStrType(divisor):  # Coerce if dividing by integer or string
+            divisor = GF8elt(divisor)
         return self.div(divisor)
 
-    def __ifloordiv__(self,divisor):  # Overload the "//=" operator
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
-            divisor = GF8AESelt(divisor)
+    def __ifloordiv__(self, divisor):  # Overload the "//=" operator
+        if isinstance(divisor, (int,)) or isStrType(divisor):  # Coerce if dividing by integer or string
+            divisor = GF8elt(divisor)
         return self.div(divisor)
 
-    def __itruediv__(self,divisor):  # Overload the "//=" operator in Python3
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
-            divisor = GF8AESelt(divisor)
+    def __itruediv__(self, divisor):  # Overload the "//=" operator in Python3
+        if isinstance(divisor, (int,)) or isStrType(divisor):  # Coerce if dividing by integer or string
+            divisor = GF8elt(divisor)
         return self.div(divisor)
 
-############################# Class PolyFieldUniv ###################################
+
+############################# Class GFp #################################
+# Class GFp
+# A singleton class implementing the finite field GF(p), where p is a
+#   specified prime integer.
+
+class GFp(object):
+    """A prime field, given some specified prime p
+    Usage:
+        >>> from shamirshare import *
+        >>> gf250 = GFp(1125899906842679)  # First prime larger than 2^50
+        >>> gf250
+            <shamirshare.GFp object at 0x7ff7dd8767f0>
+        >>> format(gf250)
+            'Field of integers mod prime 1125899906842679'
+        >>> a = gf250(-1); format(a)
+            1125899906842678
+        >>> a
+            <shamirshare.GFpelt object at 0x7ff7dd6a52b0>
+    """
+
+    def __init__(self, prime):
+        self.prime = prime
+
+    def __contains__(self, theelt):
+        return (self == theelt.field)
+
+    def __call__(self, theint):
+        return(GFpelt(self, theint))
+
+    def __format__(self, fmtspec):  # Over-ride format conversion
+        return "Field of integers mod prime {0:}".format(self.prime)
+
+
+############################# Class GF8elt #################################
+# Class GFpelt
+# Elements of some finite field GF(p), for a specified prime integer p.
+
+class GFpelt(object):
+    """An element of GF(p) for some specified prime p
+    We assume that there is only a single GFp in play at any time,
+    with no attempt to catch attempts to combine elements of distinct fields.
+    Usage:
+        >>> from shamirshare import *
+        >>> gf250 = GFp(1125899906842679)  # First prime larger than 2^50
+        >>> a = gf250(-1); format(a)
+            1125899906842678
+        >>> a
+            <shamirshare.GFpelt object at 0x7ff7dd6a52b0>
+        >>> format(2*a)
+            1125899906842677
+    """
+
+    def __init__(self, field, value):
+        self.field = field
+        self.value = value
+        if isinstance(value, (GFpelt,)):
+            self.value = value.value  # strip redundant GFpelt
+        elif isIntType(value):
+            self.value = self.__normalize(value)
+
+    def __normalize(self, value):
+        """Given an integer, return the smallest positive integer which is equivalent mod prime"""
+        return(((value % self.field.prime) + self.field.prime) % self.field.prime)
+
+    def __eq__(self, other):  # Implement for Python 2 & 3 with overloading
+        if isIntType(other):
+            otherval = self.__normalize(other)
+        elif isinstance(other, (GFpelt,)):
+            otherval = other.value
+        return self.value == otherval
+
+    def __ne__(self, other):  # Implement for Python 2 & 3 with overloading
+        if isIntType(other):
+            otherval = self.__normalize(other)
+        elif isinstance(other, (GFpelt,)):
+            otherval = other.value
+        return self.value != otherval
+
+    ######################## Format Operators #################################
+
+    def __format__(self, fmtspec):  # Over-ride format conversion
+        if fmtspec == '': return "{0:}".format(self.value)  # Default format is decimal
+        if fmtspec == 'x': return "{0:x}".format(self.value)
+        if fmtspec == 'b': return "{0:b}".format(self.value)
+
+    def __str__(self):
+        """over-ride string conversion used by print"""
+        return '{0:}'.format(self.value)
+
+    def __int__(self):
+        """convert to integer"""
+        return self.value
+
+    def __index__(self):
+        """convert to integer for various uses including bin, hex and oct (Python 2.5+ only)"""
+        return self.value
+
+    if sys.version_info < (3,):  # Overload hex() and oct() (bin() was never backported to Python 2)
+        def __hex__(self): return "0x{0:x}".format(self.value)
+        def __oct__(self): return oct(self.__index__())
+
+    ######################## Addition Operators ###############################
+
+    def add(self,summand):
+        """add elements of GFpelt (overloaded to allow adding integers)"""
+        if isIntType(summand):
+            summand = self.field(summand)
+        elif isinstance(summand, (PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
+            return summand.add(self)
+        elif not isinstance(summand, (GFpelt,)):
+            raise NotImplementedError("Can't add GFpelt object to {0:} object".format(type(summand)))
+        return GFpelt(self.field, (self.value + summand.value) % self.field.prime)
+
+    def __add__(self,summand):   # Overload the "+" operator
+        return self.add(summand)
+
+    def __radd__(self,summand):  # Overload the "+" operator
+        return self.add(summand)  # Because addition is commutative
+
+    def __iadd__(self,summand): # Overload the "+=" operator
+        self = self.add(summand)
+        return self
+
+    def __neg__(self):  # Overload the "-" unary operator
+        return GFpelt(self.field, (self.field.prime-self.value) % self.field.prime)
+
+    def __sub__(self,summand):  # Overload the "-" binary operator
+        return self.add(-summand)
+
+    def __isub__(self,summand): # Overload the "-=" operator
+        self = self.add(-summand)
+        return self
+
+    ######################## Multiplication Operators ################################
+
+    def mul(self, multip):  # Elementary multiplication in finite fields
+        """multiply elements of GFpelt (overloaded to allow integers)"""
+        if isIntType(multip):  # Coerce if multiplying integer
+            multip = self.__normalize(multip)
+        elif isinstance(multip, (GFpelt,)):
+            multip = multip.value
+        elif isinstance(multip, (PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
+            return multip.mul(self)
+        elif not isinstance(multip, (GFpelt,)):
+            raise NotImplementedError("Can't multiply GFpelt object with {0:} object".format(type(multip)))
+        return GFpelt(self.field, ((self.value * multip) % self.field.prime))
+
+    def __mul__(self, multip):  # Overload the "*" operator
+        return self.mul(multip)
+
+    def __rmul__(self, multip):  # Overload the "*" operator when first multiplicand can be coerced to GFpelt
+        return self.mul(multip)  # Because multiplication is commutative
+
+    def __imul__(self, multip):  # Overload the "*=" operator
+        self = self.mul(multip)
+        return self
+
+    ######################## Division Operators ######################################
+
+    def inv(self):
+        """inverse of element in GFp"""
+        if (self.value == 0): raise ZeroDivisionError("Attempting to invert zero element of GFp")
+        return GFpelt(self.field, GFpelt.__xgcd(self.value,self.field.prime)[1])
+
+    @staticmethod
+    def __xgcd(a, b):
+        """xgcd(a,b) returns a tuple of form (g,x,y), where g is gcd(a,b) and
+        x,y satisfy the equation g = ax + by."""
+        a1 = 1; b1 = 0; a2 = 0; b2 = 1; aneg = 1; bneg = 1
+        if(a < 0):
+            a = -a; aneg = -1
+        if(b < 0):
+            b = -b; bneg = -1
+        while (1):
+            quot = -(a // b)
+            a = a % b
+            a1 = a1 + quot*a2; b1 = b1 + quot*b2
+            if(a == 0):
+                return (b, a2*aneg, b2*bneg)
+            quot = -(b // a)
+            b = b % a
+            a2 = a2 + quot*a1; b2 = b2 + quot*b1
+            if(b == 0):
+                return (a, a1*aneg, b1*bneg)
+
+    def div(self, divisor):
+        """divide elements of GFpelt (overloaded to allow integers)"""
+        if isIntType(divisor):  # Coerce if dividing by integer
+            divisor = GFpelt(self.field, self.__normalize(divisor))
+        elif not isinstance(divisor, (GFpelt,)):
+            raise NotImplementedError("Can't divide GFpelt object by {0:} object".format(type(divisor)))
+        return self * divisor.inv()
+
+    def __div__(self, divisor):  # Overload the "/" operator in Python2
+        return self.div(divisor)
+
+    def __truediv__(self, divisor):  # Overload the "/" operator in Python3
+        return self.div(divisor)
+
+    # As GFp is a field, there is no real need for floordiv, but include it
+    # as someone will try "//" in any event - if only in error
+
+    def __floordiv__(self, divisor):  # Overload the "//" operator in Python2/3
+        return self.div(divisor)
+
+    def __rdiv__(self, dividend):
+        """divide elements of GFpelt (overloaded to allow integers)"""
+        if isIntType(dividend):  # Coerce dividing integer by GFpelt
+            dividend = GFpelt(self.field, self.__normalize(dividend))
+        elif not isinstance(dividend, (GFpelt, )):
+            raise NotImplementedError("Can't divide {0:} object by GFpelt object".format(type(dividend)))
+        return dividend * self.inv()
+
+    def __rtruediv__(self, dividend):  # Overload the "/" operator in Python3
+        return self.__rdiv__(dividend)
+
+    def __rfloordiv__(self, dividend):  # Overload the "//" operator in Python2 and Python3
+        return self.__rdiv__(dividend)
+
+    def __idiv__(self, divisor):  # Overload the "/=" operator in Python2
+        return self.div(divisor)
+
+    def __ifloordiv__(self, divisor):  # Overload the "//=" operator
+        return self.div(divisor)
+
+    def __itruediv__(self, divisor):  # Overload the "//=" operator in Python3
+        return self.div(divisor)
+
+
+############################# Class PolyFieldUniv #############################
 # Class PolyFieldUniv
 # A univariable polynomial ring over a specified field of coefficients.
 #   A simple container class for PolyFieldUnivElt objects.
-#####################################################################################
+###############################################################################
 
 class PolyFieldUniv(object):
-    """Polynomial Ring with a single variable over a specified field of coefficients.
+    """Polynomial Ring with a single variable (univariate) over
+       a specified field of coefficients.
     Usage:
         >>> from shamirshare import *
-        >>> GF8x = shamirshare.PolyFieldUniv()         # Default GF8AESelt coeffring
+        >>> GF8x = shamirshare.PolyFieldUniv()         # Default GF8elt coeffring
         >>> p3 = shamirshare.PolyFieldUnivElt(GF8x,[1,2,3])
         >>> format(p3)
         '[01, 02, 03, ]'
         """
 
-    def __init__(self, coeffring=type(GF8AESelt(0)), var='x', fmtspec="l"):
-        self.coeffring = coeffring       # Set the default coefficient ring (well, actually field)
+    def __init__(self, coeffring=type(GF8()), var='x', fmtspec="l"):
+        self.coeffring = coeffring       # Set the coefficient ring (well, actually field)
         self.var = var                   # Used by polynomial format output
         self.fmtspec = fmtspec           # p=polynomial; c=coeffsonly; l=list of coeffs
 
-    def __call__(self,elts):  # Coerce constant or array of coeffs as elt of poly ring
-        if isinstance(elts,PolyFieldUnivElt): # Handle unnecessary coercion
+    def __format__(self, fmtspec):  # Over-ride format conversion
+        """Override the format when outputting a PolyFieldUniv element."""
+        return("Polynomial ring with coeffs in {0:} and variable \"{1:}\"".format(self.coeffring, self.var))
+
+    def __call__(self, elts):  # Coerce constant or array of coeffs
+        if isinstance(elts, PolyFieldUnivElt):  # Handle unnecessary coercion
             return elts
         elif isListType(elts):              # List or Sequence
-            return PolyFieldUnivElt(self,list(map(self.coeffring,elts)))
-        elif isIntType(elts) or isStrType(elts):       # Overload int/string --> constant poly
+            return PolyFieldUnivElt(self, list(map(self.coeffring, elts)))
+        elif isIntType(elts) or isStrType(elts):  # Overload int/string --> constant poly
             self.coeffs = [self.coeffring(elts)]
         else:
-            return PolyFieldUnivElt(self,[self.coeffring(elts)]) # Coerce coeff as constant poly
+            return PolyFieldUnivElt(self, [self.coeffring(elts)])  # Coerce coeff as constant poly
 
-    def fit(self,thepoints):  # Lagrange Interpolation
+    def fit(self, thepoints):  # Lagrange Interpolation
         """Find the unique degree (n-1) polynomial fitting the n presented values,
         using Lagrange Interpolation.
         Usage: fit(((3,'05'),(2,'f4'),...)) returns a polynomial p such that p(3) = '05', ...
@@ -355,11 +634,11 @@ class PolyFieldUniv(object):
 #####################################################################################
 
 class PolyFieldUnivElt(object):
-    """An element of the ring of polynomails with coefficients in GF(2^8), GF(2^16) or a
-       prime field.
+    """An element of the ring of univariate polynomails with coefficients in
+       GF(2^8), GF(2^16) or a prime field, GFp.
     Usage:
         >>> from shamirshare import *
-        >>> GF8x = PolyFieldUniv()   # Polynomial Ring: default GF8AESelt coeffs
+        >>> GF8x = PolyFieldUniv()   # Polynomial Ring: default GF8elt coeffs
         >>> p3 = PolyFieldUnivElt(GF8x,[1,2,3])
         >>> format(p3)
         '[01, 02, 03, ]'
@@ -374,17 +653,18 @@ class PolyFieldUnivElt(object):
 
     def __init__(self, polyring, coeffs):
         self.polyring = polyring
-        if isinstance(coeffs,(PolyFieldUnivElt,)): self.coeffs = [self.polyring.coeffring(thecoeff) for thecoeff in coeffs.coeffs]
-        elif isinstance(coeffs,(self.polyring.coeffring,)):       # Overload coeffring elt --> constant poly
-            self.coeffs = [coeffs]
-        elif isIntType(coeffs) or isStrType(coeffs):       # Overload int/string --> constant poly
+        if isinstance(coeffs, (PolyFieldUnivElt,)):  # Cloning an element
+            self.coeffs = [self.polyring.coeffring(thecoeff) for thecoeff in coeffs.coeffs]
+        elif isIntType(coeffs) or isStrType(coeffs):  # Overload int/string --> constant poly
             self.coeffs = [self.polyring.coeffring(coeffs)]
-        elif isListType(coeffs):                        # Overload list --> poly
-            coeffs = PolyFieldUnivElt.__trimlist__(coeffs)               # Remove trailing (high order) zeros
+        elif isListType(coeffs):                       # Overload list --> poly
+            coeffs = PolyFieldUnivElt.__trimlist__(coeffs)         # Remove trailing (high order) zeros
             self.coeffs = [self.polyring.coeffring(thecoeff) for thecoeff in coeffs]
+        elif (coeffs in self.polyring.coeffring):      # Overload coeffring elt --> constant poly
+            self.coeffs = [coeffs]
 
     @staticmethod
-    def __trimlist__(thelist):  # Remove trailing (high order) zeros in coeff lists
+    def __trimlist__(thelist):  # Remove trailing (high order) zeros in lists
         for x in reversed(thelist):
             if x == 0:  # Rely on overloading of __eq__ for coefficient ring
                 del thelist[-1:]
@@ -392,21 +672,22 @@ class PolyFieldUnivElt(object):
                 break
         return thelist
 
-    def __eq__(self,other): # Implement for both Python2 and Python3 with overloading
-        if isIntType(other) or isStrType(other) or isListType(other) or isinstance(other,(self.polyring.coeffring,)):
+    def __eq__(self, other):  # Implement for Python 2 & 3 with overloading
+        if isIntType(other) or isStrType(other) or isListType(other) or (other in self.polyring.coeffring):
             otherpoly = PolyFieldUnivElt(self.polyring,other)
         else: otherpoly = other
         return self.coeffs == otherpoly.coeffs
 
-    def __ne__(self,other): # Implement for both Python2 and Python3 with overloading
-        if isIntType(other) or isStrType(other) or isListType(other) or isinstance(other,(self.polyring.coeffring,)):
+    def __ne__(self, other):  # Implement for Python 2 & 3 with overloading
+        if isIntType(other) or isStrType(other) or isListType(other) or (other in self.polyring.coeffring):
             otherpoly = PolyFieldUnivElt(self.polyring,other)
-        else: otherpoly = other
+        else:
+            otherpoly = other
         return self.coeffs == otherpoly.coeffs
 
-    ######################## Format Operators ########################################
+    ######################## Format Operators #################################
 
-    def __format__(self,fmtspec):  # Over-ride format conversion
+    def __format__(self, fmtspec):  # Over-ride format conversion
         """Override the format when outputting a PolyFieldUnivElt element.
         Possible formats are:
             l - list of coefficients
@@ -414,73 +695,84 @@ class PolyFieldUnivElt(object):
         """
         if fmtspec == '': fmtspec = 'l'  # Default format is list
         if fmtspec == 'l': return "["+"".join([(format(thecoeff)+", ") for thecoeff in self.coeffs])+"]"
-        if fmtspec == 'p': raise NotImplementedError("polynomial format for PolyFieldUnivarelt is not yet implemented")
+        if fmtspec == 'p': raise NotImplementedError("polynomial format for PolyFieldUnivElt is not yet implemented")
 
     def __str__(self):
         """over-ride string conversion used by print"""
         return '{0:l}'.format(self)
 
-    ######################## Addition Operators ######################################
+    ######################## Addition Operators ###############################
 
     @staticmethod
-    def __addlists__(list1,list2):
+    def __addlists__(list1, list2):
         returnlist = [((list1[i] if i<len(list1) else 0) + (list2[i] if i<len(list2) else 0)) for i in range(max(len(list1),len(list2)))]
         return returnlist
 
-    def add(self,summand):
+    def add(self, summand):
         """add elements of PolyFieldUnivElt (overloaded to allow adding integers and lists of integers)"""
-        thecoeffs = PolyFieldUnivElt.__addlists__(self.coeffs,summand.coeffs)
+        if isinstance(summand, (PolyFieldUnivElt,)):
+            summand = summand  # Just multiplying
+        elif isListType(summand):
+            # Coerce if adding list, elts are coerceable into coeff ring
+            summand = PolyFieldUnivElt(self.polyring, [self.polyring.coeffring(thecoeff) for thecoeff in summand])
+        elif isinstance(summand, (int,)) or isStrType(summand) or (summand in self.polyring.coeffring):  # Coerce if adding integer or string and GF8elt
+            summand = PolyFieldUnivElt(self.polyring, summand)
+        else:
+            raise NotImplementedError("Can't add PolyFieldUnivElt object to {0:} object".format(type(summand)))
+        thecoeffs = PolyFieldUnivElt.__addlists__(self.coeffs, summand.coeffs)
         thecoeffs = PolyFieldUnivElt.__trimlist__(thecoeffs)
-        return PolyFieldUnivElt(self.polyring,thecoeffs)
+        return PolyFieldUnivElt(self.polyring, thecoeffs)
 
-    def __add__(self,summand):   # Overload the "+" operator
-        if isIntType(summand) or isStrType(summand) or isListType(summand): # Coerce if adding integer, string or list
-            return self.add(PolyFieldUnivElt(self.polyring,summand))
+    def __add__(self, summand):   # Overload the "+" operator
+        if isIntType(summand) or isStrType(summand) or isListType(summand):  # Coerce if adding integer, string or list
+            return self.add(PolyFieldUnivElt(self.polyring, summand))
         else:
             return self.add(summand)
 
-    def __radd__(self,summand):  # Overload the "+" operator when first addend can be coerced to ring of coeffs
+    def __radd__(self, summand):  # Overload the "+" operator when first addend can be coerced to ring of coeffs
         return self.__add__(summand)  # Because addition is commutative
 
-    def __iadd__(self,summand): # Overload the "+=" operator
+    def __iadd__(self, summand):  # Overload the "+=" operator
         self = self + summand
         return self
 
-    def __neg__(self):  # Overload the "-" unary operator (makes no sense over GF(2) - true)
-        return PolyFieldUnivElt(self.polyring,[-thecoeff for thecoeff in self.coeffs])
+    def __neg__(self):  # Overload the "-" unary operator (not over GF(2))
+        return PolyFieldUnivElt(self.polyring, [-thecoeff for thecoeff in self.coeffs])
 
-    def __sub__(self,summand):  # Overload the "-" binary operator
+    def __sub__(self, summand):  # Overload the "-" binary operator
         return self.__add__(-summand)
 
-    def __isub__(self,summand): # Overload the "-=" operator
+    def __isub__(self, summand):  # Overload the "-=" operator
         self = self - summand
         return self
 
-    ######################## Multiplication Operators ################################
+    ######################## Multiplication Operators #########################
 
-    def mul(self,multand):  # Elementary multiplication of polynomials
+    def mul(self, multand):  # Elementary multiplication of polynomials
         """multiply polynomials (overloaded to allow integers and lists of integers)"""
+        if isinstance(multand, (PolyFieldUnivElt,)):
+            multand = multand  # Just multiplying
+        elif isListType(multand):
+            # Coerce if multiplying list, elts are coerceable into coeff ring
+            multand = PolyFieldUnivElt(self.polyring, [self.polyring.coeffring(thecoeff) for thecoeff in multand])
+        elif isinstance(multand, (int,)) or isStrType(multand) or (multand in self.polyring.coeffring):  # Coerce if adding integer or string and GF8elt
+            multand = PolyFieldUnivElt(self.polyring, multand)
+        else:
+            raise NotImplementedError("Can't multiply PolyFieldUnivElt object by {0:} object".format(type(multand)))
         polydeg = len(self.coeffs)+len(multand.coeffs)-2
         thelist = [self.polyring.coeffring(0) for i in range(polydeg+1)]
         for d in range(polydeg+1):
-            thelist[d] = sum(self.coeffs[d-i]*multand.coeffs[i] for i in range(max(0,d-len(self.coeffs)+1),min(d+1,len(multand.coeffs))))
-        return PolyFieldUnivElt(self.polyring,thelist)
+            thelist[d] = sum(self.coeffs[d-i]*multand.coeffs[i] for i in range(max(0, d-len(self.coeffs)+1), min(d+1, len(multand.coeffs))))
+        return PolyFieldUnivElt(self.polyring, thelist)
 
-    def __mul__(self,multand):  # Overload the "*" operator
-        if isListType(multand):
-            # Coerce if multiplying list, elts are coerceable into coeff ring, thought of as poly coeff list
-            return self.mul(PolyFieldUnivElt(self.polyring,[self.polyring.coeffring(thecoeff) for thecoeff in multand]))
-        elif isIntType(multand) or isinstance(multand,self.polyring.coeffring):
-            # Coerce if multiplying integer or elt of coeff field (thought of as constant, ie deg 0, polynomial)
-            return self.mul(PolyFieldUnivElt(self.polyring,multand))
-        else: # Normal case, multiply by PolynomialFieldUnivarElt
-            return self.mul(multand)
+    def __mul__(self, multand):  # Overload the "*" operator
+        return self.mul(multand)
 
     def __rmul__(self,multand):  # Overload the "*" operator
-        return self.__mul__(multand)
+        return self.mul(multand)
 
     def __imul__(self,multand): # Overload the "*=" operator
-        self = self * multand
+        self = self.mul(multand)
         return self
 
     ######################## Division Operators ######################################
@@ -488,67 +780,65 @@ class PolyFieldUnivElt(object):
     # Not needed (I think) for Shamir SS
     # BUT ... Do need to implement division of polynomial by constant
 
-    def div(self,divisor):  # Elementary division of polynomials (but only by constants)
+    def div(self, divisor):  # Elementary poly division (but only by constants)
         """divide polynomials - for shamirshare only need case of dividing by constants
         (overloaded to allow integers and lists of integers)
         As the coefficient ring (self.polyring.coeffring) is assumed to be a field, we combine floordiv and truediv functions."""
-        if (divisor == 0): raise ZeroDivisionError("Attempting to divide polynomial by zero element of coefficient ring")
-        return PolyFieldUnivElt(self.polyring,[self.coeffs[i]/divisor for i in range(len(self.coeffs))])
-
-    def __div__(self,divisor):  # Overload the "/" operator in Python2
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
+        if isinstance(divisor, (int,)) or isStrType(divisor):  # Coerce if dividing by integer or string
             divisor = self.polyring.coeffring(divisor)
-        return self.div(divisor)
-
-    def __truediv__(self,divisor):  # Overload the "/" operator in Python3
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
-            divisor = self.polyring.coeffring(divisor)
-        return self.div(divisor)
-
-    def __floordiv__(self,divisor):  # Overload the "//" operator in Python2 and Python3
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
-            divisor = self.polyring.coeffring(divisor)
-        return self.div(divisor)
-
-    def idiv(self,divisor):  # In-place division of polynomials (but only by constants)
-        """in-place divide polynomials - for shamirshare only need case of dividing by constants
-        (overloaded to allow integers and lists of integers)
-        As the coefficient ring (self.polyring.coeffring) is assumed to be a field, we combine floordiv and truediv functions."""
+        elif not (divisor in self.polyring.coeffring):
+            raise NotImplementedError("Can't divide PolyFieldUnivElt object by {0:} object".format(type(divisor)))
         if (divisor == 0): raise ZeroDivisionError("Attempting to divide polynomial by zero element of coefficient ring")
         for i in range(len(self.coeffs)): self.coeffs[i] /= divisor
         return self
 
-    def __idiv__(self,divisor):  # Overload the "/=" operator in Python2
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
+    def __div__(self, divisor):  # Overload the "/" operator in Python2
+        return self.div(divisor)
+
+    def __truediv__(self, divisor):  # Overload the "/" operator in Python3
+        return self.div(divisor)
+
+    def __floordiv__(self, divisor):  # Overload "//" operator in Python2 & 3
+        return self.div(divisor)
+
+    def idiv(self, divisor):  # In-place poly division (but only by constants)
+        """in-place divide polynomials - for shamirshare only need case of
+        dividing by constants (overloaded to allow integers).  As the
+        coefficient ring (self.polyring.coeffring) is assumed to be a field,
+        we combine floordiv and truediv functions."""
+        if isinstance(divisor, (int,)) or isStrType(divisor):  # Coerce if dividing by integer or string
             divisor = self.polyring.coeffring(divisor)
+        elif not (divisor in self.polyring.coeffring):
+            raise NotImplementedError("Can't divide PolyFieldUnivElt object by {0:} object".format(type(divisor)))
+        if (divisor == 0): raise ZeroDivisionError("Attempting to divide polynomial by zero element of coefficient ring")
+        for i in range(len(self.coeffs)): self.coeffs[i] /= divisor
+        return self
+
+    def __idiv__(self, divisor):  # Overload the "/=" operator in Python2
         return self.idiv(divisor)
 
-    def __ifloordiv__(self,divisor):  # Overload the "//=" operator
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
-            divisor = self.polyring.coeffring(divisor)
+    def __ifloordiv__(self, divisor):  # Overload the "//=" operator
         return self.idiv(divisor)
 
-    def __itruediv__(self,divisor):  # Overload the "//=" operator in Python3
-        if isinstance(divisor,(int,)) or isStrType(divisor): # Coerce if dividing by integer or string
-            divisor = self.polyring.coeffring(divisor)
+    def __itruediv__(self, divisor):  # Overload the "//=" operator in Python3
         return self.idiv(divisor)
 
-    ######################## Other Operators #########################################
+    ######################## Other Operators ##################################
 
-    def eval(self,xvalue):  # Evaluate a function at a given value using Horder's Rule
+    def eval(self, xvalue):  # Evaluate poly at given value using Horder's Rule
         polydeg = len(self.coeffs)-1
         theval = self.coeffs[polydeg]
-        for theindex in range(polydeg-1,-1,-1):
+        for theindex in range(polydeg-1, -1, -1):
             theval = theval*xvalue + self.coeffs[theindex]
-        return theval  # Note: Value returned is in polyring.coeffring, not the polynomial ring
+        return theval  # Note: Value is in polyring.coeffring, not polyring
 
     # Allow usage "p1(123)" to evaluate polynomial p1 at the value 123
-    def __call__(self,value):
+    def __call__(self, value):
         return self.eval(value)
 
 # Thoughts and Bugs:
 #   - Should class(elt) be a deep copy or should it just return elt?
-#   - Implement GF8AESelt.random() to get random elements
+#   - Implement GF8elt.random() to get random elements
 #   - Need to implement GF(2^16) and GF(prime)
 
 ############################################################################
@@ -564,15 +854,16 @@ class PolyFieldUnivElt(object):
 #
 #    2. Redistributions in binary form must reproduce the above copyright
 #       notice, this list of conditions and the following disclaimer in
-#       the documentation and/or other materials provided with the distribution.
+#       the documentation and/or other materials provided with the distribution
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND ANY EXPRESS
-# OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
-# SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
-# BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ############################################################################
