@@ -1,12 +1,12 @@
 # KMIP-SplitKey
 Python (and maybe later Rust) implementation of Shamir Secret Sharing, as specified in the KMIP v2.0 protocol
 
-Current status: ver 0.2, 4 Sept 2019:
-   * Basic GFp and GF8 functionality working
-   * Python 2 broken by Singleton implementation - will fix
+Current status: ver 0.21, 7 Sept 2019:
+   * Basic GFp and GF8 functionality working (need to implement GF16)
+   * Python 2 Singleton issue fixed
    
 Plans:
-   * Fix Python 2 use (why?) and clean up shamirshare.py
+   * Clean up shamirshare.py and add support for GF16
    * Rewrite and tighten up as shamirshare2.py
    * Rewrite in a more conventional language (Rust maybe? Probably not C.  Not COBOL, so don't ask)
    
