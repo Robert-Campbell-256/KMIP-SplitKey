@@ -5,8 +5,8 @@
 # Implement Shamir Secret Sharing mechanism over 8-bit, 16-bit,
 # and prime fields as specified in the KMIP v2.0 protocol.
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
-# Date: 4 Sept 2019
-# Version 0.2
+# Date: 7 Sept 2019
+# Version 0.21
 # License: Simplified BSD (see details at bottom)
 ###############################################################################
 
@@ -45,22 +45,24 @@ Usage:  Implement a 4-of-5 KeySplit over GFp(13)
         >>> GFp13x = shamirshare.PolyFieldUniv(gf13)
         >>> pfit13 = GFp13x.fit(((1,3),(2,6),(3,-2),(4,0))); format(pfit13)
             '[7, 6, 6, 10, ]'
+        >>> format(pfit13,'p')  # Familiar polynomial format
+            '(7) + (6) x + (6) x^2 + (10) x^3'
         >>> print(pfit13(5))   # The additional split for user #5
             7
         >>> print(pfit13(0))   # The resulting split secret
             7
     """
 
-__version__ = '0.2'  # Format specified in Python PEP 396
-Version = 'shamirshare.py, version ' + __version__ + ', 4 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
+__version__ = '0.21'  # Format specified in Python PEP 396
+Version = 'shamirshare.py, version ' + __version__ + ', 7 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
 
 import random
 import sys     # Check Python2 or Python3
 
 
 def isStrType(x):
-    if sys.version_info < (3,): return isinstance(x,(basestring,))
-    else: return isinstance(x,(str,))
+    if sys.version_info < (3,): return isinstance(x, (basestring,))
+    else: return isinstance(x, (str,))
 
 
 def isIntType(x):
@@ -86,12 +88,12 @@ class GF8(object):
     (driving polynomial x^8 + x^4 + x^3 + x + 1, aka "1b")
     """
 
-    instance = None
+    _instance = None
 
     def __new__(cls):
-        if cls.instance is None:
-            cls.instance = super().__new__(cls)
-        return cls.instance
+        if not isinstance(cls._instance, cls):
+            cls._instance = object.__new__(cls)
+        return cls._instance
 
     def __contains__(self, elt):
         return isinstance(elt, (GF8elt,))
@@ -129,7 +131,7 @@ class GF8elt(object):
     def __init__(self, value):
         if isinstance(value, (GF8elt,)): self.value = value.value  # strip redundant GF8elt
         if isinstance(value, (int,)): self.value = value
-        elif isStrType(value): self.value = int(value,16)  # For the moment, assume hex
+        elif isStrType(value): self.value = int(value, 16)  # For the moment, assume hex
 
     def __eq__(self, other):  # Implement for both Python2 & 3 with overloading
         if isIntType(other): otherval = other
@@ -159,7 +161,8 @@ class GF8elt(object):
             '00110111'"""
         if fmtspec == '': fmtspec = GF8elt.fmtspec  # Default format is hex
         if fmtspec == 'x': return "{0:02x}".format(self.value)
-        if fmtspec == 'b': return "{0:08b}".format(self.value)
+        elif fmtspec == 'b': return "{0:08b}".format(self.value)
+        else: raise ValueError("The format string \'{0:}\' doesn't make sense (or isn't implemented) for a GF8elt object".format(fmtspec))
 
     def __str__(self):
         """over-ride string conversion used by print"""
@@ -423,8 +426,9 @@ class GFpelt(object):
 
     def __format__(self, fmtspec):  # Over-ride format conversion
         if fmtspec == '': return "{0:}".format(self.value)  # Default format is decimal
-        if fmtspec == 'x': return "{0:x}".format(self.value)
-        if fmtspec == 'b': return "{0:b}".format(self.value)
+        elif fmtspec == 'x': return "{0:x}".format(self.value)
+        elif fmtspec == 'b': return "{0:b}".format(self.value)
+        else: raise ValueError("The format string \'{0:}\' doesn't make sense (or isn't implemented) for a GFpelt object".format(fmtspec))
 
     def __str__(self):
         """over-ride string conversion used by print"""
@@ -444,7 +448,7 @@ class GFpelt(object):
 
     ######################## Addition Operators ###############################
 
-    def add(self,summand):
+    def add(self, summand):
         """add elements of GFpelt (overloaded to allow adding integers)"""
         if isIntType(summand):
             summand = self.field(summand)
@@ -454,23 +458,23 @@ class GFpelt(object):
             raise NotImplementedError("Can't add GFpelt object to {0:} object".format(type(summand)))
         return GFpelt(self.field, (self.value + summand.value) % self.field.prime)
 
-    def __add__(self,summand):   # Overload the "+" operator
+    def __add__(self, summand):   # Overload the "+" operator
         return self.add(summand)
 
-    def __radd__(self,summand):  # Overload the "+" operator
+    def __radd__(self, summand):  # Overload the "+" operator
         return self.add(summand)  # Because addition is commutative
 
-    def __iadd__(self,summand): # Overload the "+=" operator
+    def __iadd__(self, summand):  # Overload the "+=" operator
         self = self.add(summand)
         return self
 
     def __neg__(self):  # Overload the "-" unary operator
         return GFpelt(self.field, (self.field.prime-self.value) % self.field.prime)
 
-    def __sub__(self,summand):  # Overload the "-" binary operator
+    def __sub__(self, summand):  # Overload the "-" binary operator
         return self.add(-summand)
 
-    def __isub__(self,summand): # Overload the "-=" operator
+    def __isub__(self, summand):  # Overload the "-=" operator
         self = self.add(-summand)
         return self
 
@@ -612,20 +616,20 @@ class PolyFieldUniv(object):
         Usage: fit(((3,'05'),(2,'f4'),...)) returns a polynomial p such that p(3) = '05', ...
         Given a list ((x1,y1),(x2,y2),...,(xn,yn)), return the polynomials
         Sum(j, Prod(i!=j, yj*(x-xi)/(xj-xi)))"""
-        thepoly = PolyFieldUnivElt(self,[])
-        xvals = [self.coeffring(x) for x,y in thepoints]  # Should be a better way to do this
-        yvals = [self.coeffring(y) for x,y in thepoints]
+        thepoly = PolyFieldUnivElt(self, [])
+        xvals = [self.coeffring(x) for x, y in thepoints]  # Should be a better way to do this
+        yvals = [self.coeffring(y) for x, y in thepoints]
         ptslen = sum(1 for k in xvals)
         for j in range(ptslen):  # Compute len of xvals
-            theterm = PolyFieldUnivElt(self,[1])
+            theterm = PolyFieldUnivElt(self, [1])
             theprod = self.coeffring(1)
-            for i in (i for i in range(ptslen) if i!=j):
-                theterm *= PolyFieldUnivElt(self,[-xvals[i],1])       # Multiply by (1*x - xi)
+            for i in (i for i in range(ptslen) if (i != j)):
+                theterm *= PolyFieldUnivElt(self, [-xvals[i], 1])       # Multiply by (1*x - xi)
                 theprod *= (xvals[j] - xvals[i])
             thepoly += (yvals[j]*theterm/theprod)
         return thepoly
 
-############################# Class PolyFieldUnivElt ################################
+############################# Class PolyFieldUnivElt ##########################
 # Class PolyFieldUnivElt
 # Elements of the univariate polynomial ring with coefficients in a field.
 #   Only those functions are implemented for cases where the coefficient field
@@ -674,13 +678,13 @@ class PolyFieldUnivElt(object):
 
     def __eq__(self, other):  # Implement for Python 2 & 3 with overloading
         if isIntType(other) or isStrType(other) or isListType(other) or (other in self.polyring.coeffring):
-            otherpoly = PolyFieldUnivElt(self.polyring,other)
+            otherpoly = PolyFieldUnivElt(self.polyring, other)
         else: otherpoly = other
         return self.coeffs == otherpoly.coeffs
 
     def __ne__(self, other):  # Implement for Python 2 & 3 with overloading
         if isIntType(other) or isStrType(other) or isListType(other) or (other in self.polyring.coeffring):
-            otherpoly = PolyFieldUnivElt(self.polyring,other)
+            otherpoly = PolyFieldUnivElt(self.polyring, other)
         else:
             otherpoly = other
         return self.coeffs == otherpoly.coeffs
@@ -695,7 +699,8 @@ class PolyFieldUnivElt(object):
         """
         if fmtspec == '': fmtspec = 'l'  # Default format is list
         if fmtspec == 'l': return "["+"".join([(format(thecoeff)+", ") for thecoeff in self.coeffs])+"]"
-        if fmtspec == 'p': raise NotImplementedError("polynomial format for PolyFieldUnivElt is not yet implemented")
+        elif fmtspec == 'p': return polyfmt(self.coeffs, var=self.polyring.var)
+        else: raise ValueError("The format string \'{0:}\' doesn't make sense (or isn't implemented) for a PolyFieldUnivElt object".format(fmtspec))
 
     def __str__(self):
         """over-ride string conversion used by print"""
@@ -705,7 +710,7 @@ class PolyFieldUnivElt(object):
 
     @staticmethod
     def __addlists__(list1, list2):
-        returnlist = [((list1[i] if i<len(list1) else 0) + (list2[i] if i<len(list2) else 0)) for i in range(max(len(list1),len(list2)))]
+        returnlist = [((list1[i] if (i < len(list1)) else 0) + (list2[i] if (i < len(list2)) else 0)) for i in range(max(len(list1), len(list2)))]
         return returnlist
 
     def add(self, summand):
@@ -768,10 +773,10 @@ class PolyFieldUnivElt(object):
     def __mul__(self, multand):  # Overload the "*" operator
         return self.mul(multand)
 
-    def __rmul__(self,multand):  # Overload the "*" operator
+    def __rmul__(self, multand):  # Overload the "*" operator
         return self.mul(multand)
 
-    def __imul__(self,multand): # Overload the "*=" operator
+    def __imul__(self, multand):  # Overload the "*=" operator
         self = self.mul(multand)
         return self
 
@@ -835,6 +840,20 @@ class PolyFieldUnivElt(object):
     # Allow usage "p1(123)" to evaluate polynomial p1 at the value 123
     def __call__(self, value):
         return self.eval(value)
+
+
+############################## Format Operators ###############################
+
+def polyfmt(coefflist, var='X'):
+    """Simple polynomial formatting routine"""
+    thestr = ""
+    if (len(coefflist) == 0): return "(0)"
+    thestr = "({0:})".format(coefflist[0])
+    if (len(coefflist) == 1): return thestr
+    if (coefflist[1] != 0): thestr += " + ({0:}) {1:s}".format(coefflist[1], var)
+    for thedeg in range(2, len(coefflist)):
+        if (coefflist[thedeg] != 0): thestr += " + ({0:}) {1:s}^{2:}".format(coefflist[thedeg], var, thedeg)
+    return thestr
 
 # Thoughts and Bugs:
 #   - Should class(elt) be a deep copy or should it just return elt?
