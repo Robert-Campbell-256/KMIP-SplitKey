@@ -5,16 +5,16 @@
 # Implement Shamir Secret Sharing mechanism over 8-bit, 16-bit,
 # and prime fields as specified in the KMIP v2.0 protocol.
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
-# Date: 7 Sept 2019
-# Version 0.21
+# Date: 11 Sept 2019
+# Version 0.3
 # License: Simplified BSD (see details at bottom)
 ###############################################################################
 
 """Code to perform a Shamir Secret Sharing split of a secret, as in KMIP v2.0.
 Possible ground fields include:
     GF(2^8) - GF8, as used by AES
-    GF(2^16) - GF16, a quadratic extension of the first (not yet implemented)
-    GF(p) - GFp, for a specified prime p (not yet implemented)
+    GF(2^16) - GF16, a quadratic extension of GF8
+    GF(p) - GFp, for a specified prime p
 Usage:  Implement a 3-of-7 KeySplit over GF(2^8)
         >>> from shamirshare import *
         >>> gf8 = GF8()                      # Create the field GF(2^8)
@@ -41,8 +41,8 @@ Usage:  Implement a 3-of-7 KeySplit over GF(2^8)
         >>> [(i, format(pfit(i))) for i in range(3,8)]
             [(3, 'af'), (4, 'd0'), (5, '3e'), (6, '3a'), (7, 'd4')]
 Usage:  Implement a 4-of-5 KeySplit over GFp(13)
-        >>> gf13 = shamirshare.GFp(13)
-        >>> GFp13x = shamirshare.PolyFieldUniv(gf13)
+        >>> gf13 = GFp(13)
+        >>> GFp13x = PolyFieldUniv(gf13)
         >>> pfit13 = GFp13x.fit(((1,3),(2,6),(3,-2),(4,0))); format(pfit13)
             '[7, 6, 6, 10, ]'
         >>> format(pfit13,'p')  # Familiar polynomial format
@@ -51,10 +51,23 @@ Usage:  Implement a 4-of-5 KeySplit over GFp(13)
             7
         >>> print(pfit13(0))   # The resulting split secret
             7
+Usage:  Implement a 3-of-5 KeySplit over GF(2^16)
+        >>> gf16 = GF16()
+        >>> gf16x = PolyFieldUniv(gf16)
+        >>> pfit16 = gf16x.fit(((1,["ab","cd"]),(2,["11","ab"]),(5,["1a","2b"]))); format(pfit16)
+            '[[ab, 34], [c2, 19], [c2, e0], ]'
+        >>> format(pfit16,'p')  # Familiar polynomial format
+            '([ab, 34]) + ([c2, 19]) x + ([c2, e0]) x^2'
+        >>> print(pfit16(3))   # The additional split for user #3
+            [11, 52]
+        >>> print(pfit16(4))   # The additional split for user #4
+            [1a, d2]
+        >>> print(pfit16(0))   # The resulting split secret
+            [ab, 34]
     """
 
-__version__ = '0.21'  # Format specified in Python PEP 396
-Version = 'shamirshare.py, version ' + __version__ + ', 7 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
+__version__ = '0.3'  # Format specified in Python PEP 396
+Version = 'shamirshare.py, version ' + __version__ + ', 11 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
 
 import random
 import sys     # Check Python2 or Python3
@@ -129,6 +142,7 @@ class GF8elt(object):
     fmtspec = 'x'  # Default format for GF8 is two hex digits
 
     def __init__(self, value):
+        self.value = 0
         if isinstance(value, (GF8elt,)): self.value = value.value  # strip redundant GF8elt
         if isinstance(value, (int,)): self.value = value
         elif isStrType(value): self.value = int(value, 16)  # For the moment, assume hex
@@ -343,6 +357,247 @@ class GF8elt(object):
             divisor = GF8elt(divisor)
         return self.div(divisor)
 
+############################# Class GF16elt #################################
+# Class GF16
+# A singleton class implementing the finite field GF16, where GF16 is the
+#   quadratic extension of GF8 defined by GF16 = GF8[z]/<z^2 + z + 3A>.
+#   Elements of GF16 are instances of GF16elt.
+#   (Defining this field as a class is not directly needed, but makes code
+#   which is templated over GF8, GF16 and various GFp easier)
+
+class GF16(object):
+    """The finite field GF(2^16), as represented by
+    GF16 = GF8[z]/<z^2 + z + 3A>, where GF8 is the field used in AES.
+    """
+
+    _instance = None
+    basefield = GF8()    # Instantiate the base field GF8
+    m = basefield('3A')  # Coeff in defining poly of GF16
+
+    def __new__(cls, *args, **kwargs):
+        if not isinstance(cls._instance, cls):
+            cls._instance = object.__new__(cls, *args, **kwargs)
+        return cls._instance
+
+    def __init__(self, var='z', fmtspec='x'):
+        # Defaults: var (for poly print) 'z'; fmtspec is list of coeffs in hex
+        self.var = var
+        self.fmtspec = fmtspec
+
+    def __contains__(self, elt):
+        return isinstance(elt, (GF16elt,))
+
+    def __call__(self, thevalue):
+        return(GF16elt(thevalue))
+
+    def __format__(self, fmtspec):  # Over-ride format conversion
+        return "Finite field GF(2^16) = GF8[z]/<z^2 + z + 3A>"
+
+############################# Class GF16elt #################################
+# Class GF16elt
+# Elements of the finite field GF16 = GF(2^16) = GF8[z]/<z^2 + z + 3A>,
+#   where GF8 is the finite field used in the construction of the AES cipher.
+
+class GF16elt(object):
+    """An element of GF(2^16) represented as a quadratic extension of GF8, the
+    finited field used in AES.  GF16elt instances are represented as linear
+    polynomials with coefficients in GF8.
+    Usage:
+        >>> from shamirshare import *
+        >>> a = GF16elt(["ab","cd"])      # (ab) + (cd)*z, where (ab), (cd) are in GF(2^8)
+        >>> a                             # Full representation
+            <GF16elt object at 0x7f797e8512b0>
+        >>> "{0:x}".format(a)    # Hex format (list of GF8 coeffs, each in hex)
+            '[ab, cd]'
+        >>> format(a,'p')        # Polynomial format (with coeffs in GF8)
+            '(ab) +  (cd)*z'
+        >>> b = shamirshare.GF16elt(5); format(b)
+            '[05, 00]'
+        >>> format((a * b) + (a.inv() * b))  # Compute (a*b) + (b/a)
+            '[9e, 7c]'
+    """
+
+    coeffs = []
+    gf16 = GF16()  # Instantiate the field
+    fmtspec = gf16.fmtspec
+    field = gf16
+
+    def __init__(self, value):
+        if isinstance(value, (GF16elt,)):
+            self.coeffs = value.coeffs  # strip redundant GF16elt
+        elif isIntType(value) or isStrType(value):
+            self.coeffs = [self.field.basefield(value), self.field.basefield(0)]
+        elif isListType(value):
+            self.coeffs = [self.field.basefield(thecoeff) for thecoeff in value[:min(2,len(value))]] + [self.field.basefield(0) for i in range(min(2,len(value)), 2)]
+        elif (value in self.field.basefield):      # Overload coeffring elt --> constant poly
+            self.coeffs = [value, self.field.basefield(0)]
+        else: raise ValueError("A GF16elt object cannot be constructed from input \'{0:}\' of type {1:}".format(value,type(value)))
+
+    def __eq__(self, other):  # Implement for both Python2 & 3 with overloading
+        if isIntType(other) or isStrType(other) or isinstance(other, (GF8elt,)) or isListType(other):
+            otherval = self.field(other)
+        elif isinstance(other, (GF16elt,)): otherval = other
+        else: raise ValueError("Cannot compare equality of a GF16elt object with \'{0:}\' of type {1:}".format(other,type(other)))
+        return self.coeffs == otherval.coeffs
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    ######################## Format Operators #################################
+
+    def __format__(self, fmtspec):  # Over-ride format conversion
+        """Override the format when outputting a GF16 element.
+        A default can be set for the field or specified for each output.
+        Possible formats are:
+            b- list of GF8 coeffs, each in binary
+            x- list of GF8 coeffs, each in hex
+            p - polynomial w/ coeffs in GF8 (default hex)
+            px - polynomial w/ coeffs in GF8 in hex
+            pb - polynomial w/ coeffs in GF8 in binary
+        Examples:
+            >>> >>> a = GF16elt(["ab","cd"])
+            >>> format(a)
+                '[ab, cd]'
+            >>> format(a,'b')
+                '[10101011, 11001101]'
+            >>> "Hex:{0:x}, Binary:{0:b}, Poly:{0:p}".format(a)
+                'Hex:[ab, cd], Binary:[10101011, 11001101], Poly:(ab) + (cd)*z'
+            """
+        if fmtspec == '': fmtspec = GF16elt.fmtspec  # Default format is hex
+        if fmtspec == 'x': return "[{0:x}, {1:x}]".format(self.coeffs[0], self.coeffs[1])
+        elif fmtspec == 'b': return "[{0:b}, {1:b}]".format(self.coeffs[0], self.coeffs[1])
+        elif (fmtspec == 'p') or (fmtspec == 'px'): return "({0:x}) +  ({1:x})*{2:}".format(self.coeffs[0], self.coeffs[1], self.field.var)
+        elif fmtspec == 'pb': return "[{0:b}, {1:b}]".format(self.coeffs[0], self.coeffs[1])
+        else: raise ValueError("The format string \'{0:}\' doesn't make sense (or isn't implemented) for a GF16elt object".format(fmtspec))
+
+    def __str__(self):
+        """over-ride string conversion used by print"""
+        return format(self, self.fmtspec)
+
+    def __int__(self):
+        """convert to integer"""
+        return (self.coeffs[0]).value + ((self.coeffs[1]).value << 8)
+
+    def __index__(self):
+        """convert to integer for various uses including bin, hex and oct (Python 2.5+ only)"""
+        return (self.coeffs[0]).value + ((self.coeffs[1]).value << 8)
+
+    if sys.version_info < (3,):  # Overload hex() and oct() (bin() was never backported to Python 2)
+        def __hex__(self): return "0x{0:04x}".format(self.__index__())
+        def __oct__(self): return oct(self.__index__())
+
+    ######################## Addition Operators ###############################
+
+    def add(self, summand):
+        """add elements of GF16elt (overloaded to allow adding integers and lists of integers)"""
+        if isinstance(summand, (PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
+            return summand.add(self)
+        elif not isinstance(summand, (GF16elt,)):
+            summand = GF16elt(summand)  # __init_ will raise except if needed
+        return GF16elt([self.coeffs[0] + summand.coeffs[0],  self.coeffs[1] + summand.coeffs[1]])
+
+    def __add__(self, summand):   # Overload the "+" operator
+        return self.add(summand)
+
+    def __radd__(self, summand):  # Overload the "+" operator when first addend can be coerced to GF8elt
+        return self.add(summand)  # Because addition is commutative
+
+    def __iadd__(self, summand):  # Overload the "+=" operator
+        self = self.add(summand)
+        return self
+
+    def __neg__(self):  # Overload "-" unary operator (no sense over GF(2))
+        return self
+
+    def __sub__(self, summand):  # Overload the "-" binary operator
+        return self.add(summand)
+
+    def __isub__(self, summand):  # Overload the "-=" operator
+        self = self.add(summand)
+        return self
+
+    ######################## Multiplication Operators #########################
+
+    def mul(self, multand):  # Elementary multiplication in finite fields
+        """multiply elements of GF16 (overloaded to allow integers and lists of integers)"""
+        if isinstance(multand, (PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
+            return multand.mul(self)
+        elif not isinstance(multand, (GF16elt,)):
+            multand = GF16elt(multand)  # __init_ will raise except if needed
+        # Multiply coeffs as elements of GF8
+        thelist = [self.coeffs[0] * multand.coeffs[0], self.coeffs[0] * multand.coeffs[1] + self.coeffs[1] * multand.coeffs[0], self.coeffs[1] * multand.coeffs[1]]
+        # And then reduce mod the driving polynomial of GF16
+        return GF16elt(GF16elt.__reduceGF16(thelist))
+
+    def __mul__(self, multand):  # Overload the "*" operator
+        return self.mul(multand)
+
+    def __rmul__(self, multand):  # Overload the "*" operator when first multiplicand can be coerced to GF8elt
+        return self.mul(multand)  # Because multiplication is commutative
+
+    def __imul__(self, multand):  # Overload the "*=" operator
+        self = self.mul(multand)
+        return self
+
+    @staticmethod
+    def __reduceGF16(thelist):  # Value 3-long list of GF8elt values
+        return [thelist[0] + thelist[2]*GF16.m, thelist[1] + thelist[2]]
+
+    ######################## Division Operators ###############################
+
+    def inv(self):
+        """inverse of element in GF16"""
+        if (self.coeffs[0].value == 0) and (self.coeffs[1].value == 0): raise ZeroDivisionError("Attempting to invert zero element of GF16")
+        # (uy + v)^(-1) = ud^(-1)y + (u + v)d(-1), where d = (u + v)v + mu^2
+        d = (self.coeffs[1] + self.coeffs[0])*self.coeffs[0] + GF16.m*self.coeffs[1]*self.coeffs[1]
+        dinv = d.inv()   # Invert in GF8
+        return GF16elt([(self.coeffs[0]+self.coeffs[1])*dinv, self.coeffs[1]*dinv])
+
+    def div(self, divisor):
+        """divide elements of GF8"""
+        if not isinstance(divisor, (GF16elt,)):
+            divisor = GF16elt(divisor)  # __init_ will raise except if needed
+        return self*divisor.inv()
+
+    def __div__(self, divisor):  # Overload the "/" operator in Python2
+        return self.div(divisor)
+
+    def __truediv__(self, divisor):  # Overload the "/" operator in Python3
+        return self.div(divisor)
+
+    # As GF16 is a field, there is no real need for floordiv, but include it
+    # as someone will try "//" in any event - if only in error
+
+    def __floordiv__(self, divisor):  # Overload "//" operator in Python 2 & 3
+        return self.div(divisor)
+
+    def __rdiv__(self, dividend):
+        if isinstance(dividend, (PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
+            return dividend.mul(self)
+        return dividend.div(self)
+
+    def __rtruediv__(self, dividend):  # Overload the "/" operator in Python3
+        if isinstance(dividend, (PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
+            return dividend.mul(self)
+        return dividend.div(self)
+
+    def __rfloordiv__(self, dividend):  # Overload "//" operator in Python2 & 3
+        if isinstance(dividend, (PolyFieldUnivElt,)):        # Bit of a hack for operator overload precedence
+            return dividend.mul(self)
+        return dividend.div(self)
+
+    def __idiv__(self, divisor):  # Overload the "/=" operator in Python2
+        self = self.div(divisor)
+        return self
+
+    def __ifloordiv__(self, divisor):  # Overload the "//=" operator
+        self = self.div(divisor)
+        return self
+
+    def __itruediv__(self, divisor):  # Overload the "//=" operator in Python3
+        self = self.div(divisor)
+        return self
+
 
 ############################# Class GFp #################################
 # Class GFp
@@ -392,7 +647,7 @@ class GFpelt(object):
             1125899906842678
         >>> a
             <shamirshare.GFpelt object at 0x7ff7dd6a52b0>
-        >>> format(2*a)
+        >>> format(2 * a)   # Integer '2' is coerced into GFp
             1125899906842677
     """
 
@@ -585,10 +840,14 @@ class PolyFieldUniv(object):
        a specified field of coefficients.
     Usage:
         >>> from shamirshare import *
-        >>> GF8x = shamirshare.PolyFieldUniv()         # Default GF8elt coeffring
-        >>> p3 = shamirshare.PolyFieldUnivElt(GF8x,[1,2,3])
+        >>> gf8x = PolyFieldUniv(GF8())
+        >>> p3 = PolyFieldUnivElt(gf8x,[1,2,3])
         >>> format(p3)
-        '[01, 02, 03, ]'
+            '[01, 02, 03, ]'
+        >>> gf16x = PolyFieldUniv(GF16()); format(gf16x)
+            'Polynomial ring with coeffs in Finite field GF(2^16) = GF8[z]/<z^2 + z + 3A> and variable "x"'
+        >>> p16 = gf16x([5,7,['ab','cd']]); format(p16,'p')
+            '([05, 00]) + ([07, 00]) x + ([ab, cd]) x^2'
         """
 
     def __init__(self, coeffring=type(GF8()), var='x', fmtspec="l"):
@@ -642,17 +901,17 @@ class PolyFieldUnivElt(object):
        GF(2^8), GF(2^16) or a prime field, GFp.
     Usage:
         >>> from shamirshare import *
-        >>> GF8x = PolyFieldUniv()   # Polynomial Ring: default GF8elt coeffs
-        >>> p3 = PolyFieldUnivElt(GF8x,[1,2,3])
+        >>> gf8x = PolyFieldUniv(GF8())
+        >>> p3 = PolyFieldUnivElt(gf8x,[1,2,3])
         >>> format(p3)
-        '[01, 02, 03, ]'
+            '[01, 02, 03, ]'
         >>> p3
-        <PolyFieldUnivElt object at 0x7f0255faee10>
-        >>> p2 = PolyFieldUnivElt(GF8x,[1,3])
-        >>> format(p3+p2)
-        '[00, 01, 03, ]'
-        >>> format(p3*p2)
-        '[01, 01, 05, 05, ]'
+            <PolyFieldUnivElt object at 0x7f0255faee10>
+        >>> p2 = gf8x([1,3])  # Shorthand for PolyFieldUnivElt(gf8x,[1,3])
+        >>> format(p3 + p2)
+            '[00, 01, 03, ]'
+        >>> format(p3 * p2, 'p')  # Polynomial format
+            '(01) + (01) x + (05) x^2 + (05) x^3'
     """
 
     def __init__(self, polyring, coeffs):
@@ -760,7 +1019,7 @@ class PolyFieldUnivElt(object):
         elif isListType(multand):
             # Coerce if multiplying list, elts are coerceable into coeff ring
             multand = PolyFieldUnivElt(self.polyring, [self.polyring.coeffring(thecoeff) for thecoeff in multand])
-        elif isinstance(multand, (int,)) or isStrType(multand) or (multand in self.polyring.coeffring):  # Coerce if adding integer or string and GF8elt
+        elif isinstance(multand, (int,)) or isStrType(multand) or (multand in self.polyring.coeffring):  # Coerce if multiplying by integer or string and GFelt
             multand = PolyFieldUnivElt(self.polyring, multand)
         else:
             raise NotImplementedError("Can't multiply PolyFieldUnivElt object by {0:} object".format(type(multand)))
