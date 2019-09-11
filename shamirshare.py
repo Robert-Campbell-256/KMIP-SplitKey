@@ -12,7 +12,7 @@
 
 """Code to perform a Shamir Secret Sharing split of a secret, as in KMIP v2.0.
 Possible ground fields include:
-    GF(2^8) - GF8, as used by AES
+    GF(2^8) - GF8, as specified by AES block cipher
     GF(2^16) - GF16, a quadratic extension of GF8
     GF(p) - GFp, for a specified prime p
 Usage:  Implement a 3-of-7 KeySplit over GF(2^8)
