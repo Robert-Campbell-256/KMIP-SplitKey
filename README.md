@@ -1,5 +1,5 @@
 # KMIP-SplitKey
-Python (and maybe later Rust) implementation of Shamir Secret Sharing, as specified in the KMIP v2.0 protocol
+Python (and maybe later Rust, maybe even Go) implementation of Shamir Secret Sharing, as specified in the KMIP v2.0 protocol
 
 ## Plans and Progress
 
@@ -14,7 +14,10 @@ languages and are prone to bugs in any language.
 
 ## Shamirshare2.py
 
-Current status: ver 0.1, 18 Sept 2019:
+Current status: ver 0.2, 21 Sept 2019:
+   * Implemented GF8
+
+ver 0.1, 18 Sept 2019:
    * Implemented GFp, fit and eval functions
    * Need to implement GF8 and GF16
 
