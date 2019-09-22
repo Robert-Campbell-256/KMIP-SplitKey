@@ -5,8 +5,8 @@
 # Operator overloading is not used, neither is type coercion outside
 # of __init__()
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
-# Date: 21 Sept 2019
-# Version 0.2
+# Date: 22 Sept 2019
+# Version 0.3
 # License: Simplified BSD (see details at bottom)
 ###############################################################################
 
@@ -30,7 +30,7 @@ Usage:  Implement a 3-of-5 KeySplit over GF(101)
         ################### Now recover the secret using splits for users 1, 4 and 5
         >>> pfit2 = fit(((1,35),(4,95),(5,41)),gf101); [pfit2[i].value for i in range(3)]
             [42, 62. 32]
-        >>> eval(pfit2,0).value
+        >>> eval(pfit2,0).value         # Evaluate pfit2(0), same as its constant term
             42
 Usage:  Implement a 3-of-4 KeySplit over GF8
         >>> gf8 = GF8()                 # Create the field GF(2^8)
@@ -44,12 +44,25 @@ Usage:  Implement a 3-of-4 KeySplit over GF8
             '82'
         ################### Now recover secret using splits for users 1, 3, 4
         >>> pfit2 = fit(((gf8(1), gf8('45')), (gf8(3), gf8('c3')), (gf8(4), gf8('82'))))
-        >>> format(pfit2[gf8(0)])
+        >>> format(pfit2[0])     # Constant term of pfit2, so value at 0
             'c7'
+Usage:  Implement a 3-of-5 KeySplit over GF(2^16)
+        >>> gf16 = GF16()                 # Create the field GF(2^8)
+        ################### Create a new key/secret and split it
+        # Three random splits: 1-->(ab+cd*z), 2-->(11+ab*z), 5-->(1a+2b*z)
+        >>> pfit16 = fit(((gf16(1),gf16(["ab","cd"])), (gf16(2),gf16(["11","ab"])), (gf16(5),gf16(["1a","2b"]))))
+        >>> list(map(format, pfit16))
+            '[[ab, 34], [c2, 19], [c2, e0], ]'
+        >>> print(eval(pfit16, gf16(3)))   # The additional split for user #3
+            [11, 52]
+        >>> print(eval(pfit16, gf16(4)))   # The additional split for user #4
+            [1a, d2]
+        >>> print(eval(pfit16, gf16(0)))   # The resulting split secret
+            [ab, 34]
 """
 
-__version__ = '0.2'  # Format specified in Python PEP 396
-Version = 'shamirshare2.py, version ' + __version__ + ', 21 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
+__version__ = '0.3'  # Format specified in Python PEP 396
+Version = 'shamirshare2.py, version ' + __version__ + ', 22 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
 
 import sys     # Check Python2 or Python3
 
@@ -385,6 +398,182 @@ class GF8elt(object):
         return self.mul(divisor.inv())
 
 
+############################# Class GF16 #################################
+# Class GF16
+# A singleton class implementing the finite field GF16, where GF16 is the
+#   quadratic extension of GF8 defined by GF16 = GF8[z]/<z^2 + z + 3A>.
+#   Elements of GF16 are instances of GF16elt.
+#   (Defining this field as a class is not directly needed, but makes code
+#   which is templated over GF8, GF16 and various GFp easier)
+
+class GF16(object):
+    """The finite field GF(2^16), as represented by
+    GF16 = GF8[z]/<z^2 + z + 3A>, where GF8 is the field used in AES.
+    """
+
+    _instance = None
+    basefield = GF8()    # Instantiate the base field GF8
+    m = basefield('3A')  # Coeff in defining poly of GF16
+
+    def __new__(cls, *args, **kwargs):
+        if not isinstance(cls._instance, cls):
+            cls._instance = object.__new__(cls, *args, **kwargs)
+        return cls._instance
+
+    def __init__(self, var='z', fmtspec='x'):
+        # Defaults: var (for poly print) 'z'; fmtspec is list of coeffs in hex
+        self.var = var
+        self.fmtspec = fmtspec
+
+    def __contains__(self, elt):
+        return isinstance(elt, (GF16elt,))
+
+    def __call__(self, thevalue):
+        return(GF16elt(thevalue))
+
+    def __format__(self, fmtspec):  # Over-ride format conversion
+        return "Finite field GF(2^16) = GF8[z]/<z^2 + z + 3A>"
+
+############################# Class GF16elt #################################
+# Class GF16elt
+# Elements of the finite field GF16 = GF(2^16) = GF8[z]/<z^2 + z + 3A>,
+#   where GF8 is the finite field used in the construction of the AES cipher.
+
+class GF16elt(object):
+    """An element of GF(2^16) represented as a quadratic extension of GF8, the
+    finited field used in AES.  GF16elt instances are represented as linear
+    polynomials with coefficients in GF8.
+    Usage:
+        >>> from shamirshare import *
+        >>> a = GF16elt(["ab","cd"])      # (ab) + (cd)*z, where (ab), (cd) are in GF(2^8)
+        >>> a                             # Full representation
+            <GF16elt object at 0x7f797e8512b0>
+        >>> "{0:x}".format(a)    # Hex format (list of GF8 coeffs, each in hex)
+            '[ab, cd]'
+        >>> format(a,'p')        # Polynomial format (with coeffs in GF8)
+            '(ab) +  (cd)*z'
+        >>> b = shamirshare.GF16elt(5); format(b)
+            '[05, 00]'
+        >>> format((a * b) + (a.inv() * b))  # Compute (a*b) + (b/a)
+            '[9e, 7c]'
+    """
+
+    coeffs = []
+    gf16 = GF16()  # Instantiate the field
+    fmtspec = gf16.fmtspec
+    field = gf16
+
+    def __init__(self, value):
+        self.field = GF16()
+        if isinstance(value, (GF16elt,)):
+            self.coeffs = value.coeffs  # strip redundant GF16elt
+        elif isIntType(value) or isStrType(value):
+            self.coeffs = [self.field.basefield(value), self.field.basefield(0)]
+        elif isListType(value):
+            self.coeffs = [self.field.basefield(thecoeff) for thecoeff in value[:min(2,len(value))]] + [self.field.basefield(0) for i in range(min(2,len(value)), 2)]
+        elif (value in self.field.basefield):      # Overload coeffring elt --> constant poly
+            self.coeffs = [value, self.field.basefield(0)]
+        else: raise ValueError("A GF16elt object cannot be constructed from input \'{0:}\' of type {1:}".format(value,type(value)))
+
+    def __eq__(self, other):  # Implement for both Python2 & 3 with overloading
+        if isIntType(other) or isStrType(other) or isinstance(other, (GF8elt,)) or isListType(other):
+            otherval = self.field(other)
+        elif isinstance(other, (GF16elt,)): otherval = other
+        else: raise ValueError("Cannot compare equality of a GF16elt object with \'{0:}\' of type {1:}".format(other,type(other)))
+        return self.coeffs == otherval.coeffs
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    ######################## Format Operators #################################
+
+    def __format__(self, fmtspec):  # Over-ride format conversion
+        """Override the format when outputting a GF16 element.
+        A default can be set for the field or specified for each output.
+        Possible formats are:
+            b- list of GF8 coeffs, each in binary
+            x- list of GF8 coeffs, each in hex
+            p - polynomial w/ coeffs in GF8 (default hex)
+            px - polynomial w/ coeffs in GF8 in hex
+            pb - polynomial w/ coeffs in GF8 in binary
+        Examples:
+            >>> >>> a = GF16elt(["ab","cd"])
+            >>> format(a)
+                '[ab, cd]'
+            >>> format(a,'b')
+                '[10101011, 11001101]'
+            >>> "Hex:{0:x}, Binary:{0:b}, Poly:{0:p}".format(a)
+                'Hex:[ab, cd], Binary:[10101011, 11001101], Poly:(ab) + (cd)*z'
+            """
+        if fmtspec == '': fmtspec = GF16elt.fmtspec  # Default format is hex
+        if fmtspec == 'x': return "[{0:x}, {1:x}]".format(self.coeffs[0], self.coeffs[1])
+        elif fmtspec == 'b': return "[{0:b}, {1:b}]".format(self.coeffs[0], self.coeffs[1])
+        elif (fmtspec == 'p') or (fmtspec == 'px'): return "({0:x}) +  ({1:x})*{2:}".format(self.coeffs[0], self.coeffs[1], self.field.var)
+        elif fmtspec == 'pb': return "[{0:b}, {1:b}]".format(self.coeffs[0], self.coeffs[1])
+        else: raise ValueError("The format string \'{0:}\' doesn't make sense (or isn't implemented) for a GF16elt object".format(fmtspec))
+
+    def __str__(self):
+        """over-ride string conversion used by print"""
+        return format(self, self.fmtspec)
+
+    def __int__(self):
+        """convert to integer"""
+        return (self.coeffs[0]).value + ((self.coeffs[1]).value << 8)
+
+    def __index__(self):
+        """convert to integer for various uses including bin, hex and oct (Python 2.5+ only)"""
+        return (self.coeffs[0]).value + ((self.coeffs[1]).value << 8)
+
+    if sys.version_info < (3,):  # Overload hex() and oct() (bin() was never backported to Python 2)
+        def __hex__(self): return "0x{0:04x}".format(self.__index__())
+        def __oct__(self): return oct(self.__index__())
+
+    ######################## Addition Operators ###############################
+
+    def add(self, summand):
+        """add elements of GF16elt (overloaded to allow adding integers and lists of integers)"""
+        if not isinstance(summand, (GF16elt,)):
+            summand = GF16elt(summand)  # __init_ will raise except if needed
+        return GF16elt([self.coeffs[0].add(summand.coeffs[0]),  self.coeffs[1].add(summand.coeffs[1])])
+
+    def neg(self):  # Overload "-" unary operator (no sense over GF(2))
+        return self
+
+    def sub(self, summand):  # Overload the "-" binary operator
+        return self.add(summand)
+
+    ######################## Multiplication Operators #########################
+
+    def mul(self, multand):  # Elementary multiplication in finite fields
+        """multiply elements of GF16 (overloaded to allow integers and lists of integers)"""
+        if not isinstance(multand, (GF16elt,)):
+            multand = GF16elt(multand)  # __init_ will raise except if needed
+        # Multiply coeffs as elements of GF8
+        thelist = [self.coeffs[0].mul(multand.coeffs[0]), self.coeffs[0].mul(multand.coeffs[1]).add(self.coeffs[1].mul(multand.coeffs[0])), self.coeffs[1].mul(multand.coeffs[1])]
+        # And then reduce mod the driving polynomial of GF16
+        return GF16elt(GF16elt.__reduceGF16(thelist))
+
+    @staticmethod
+    def __reduceGF16(thelist):  # Value 3-long list of GF8elt values
+        return [thelist[0].add(thelist[2].mul(GF16.m)), thelist[1].add(thelist[2])]
+
+    ######################## Division Operators ###############################
+
+    def inv(self):
+        """inverse of element in GF16"""
+        if (self.coeffs[0].value == 0) and (self.coeffs[1].value == 0): raise ZeroDivisionError("Attempting to invert zero element of GF16")
+        # (uy + v)^(-1) = ud^(-1)y + (u + v)d(-1), where d = (u + v)v + mu^2
+        d = (self.coeffs[1].add(self.coeffs[0])).mul(self.coeffs[0]).add(GF16.m.mul(self.coeffs[1].mul(self.coeffs[1])))
+        dinv = d.inv()   # Invert in GF8
+        return GF16elt([(self.coeffs[0].add(self.coeffs[1])).mul(dinv), self.coeffs[1].mul(dinv)])
+
+    def div(self, divisor):
+        """divide elements of GF8"""
+        if not isinstance(divisor, (GF16elt,)):
+            divisor = GF16elt(divisor)  # __init_ will raise except if needed
+        return self.mul(divisor.inv())
+
+
 ############################# Polynomial Operations ###########################
 # Polynomials are represented as a list of coefficients, but no explicit class
 # is created.
@@ -405,7 +594,7 @@ def __addlists__(list1, list2):
     returnlist = [((list1[i] if (i < len(list1)) else 0) + (list2[i] if (i < len(list2)) else 0)) for i in range(max(len(list1), len(list2)))]
     return returnlist
 
-def fit(thepoints,thefield=None):  # Lagrange Interpolation
+def fit(thepoints, thefield=None):  # Lagrange Interpolation
     """Find the unique degree (n-1) polynomial fitting the n presented values,
     using Lagrange Interpolation.
     Usage: fit(((gf8(3),gf8('05')),(gf8(2),gf8('f4')),...)) returns a polynomial p such that p(3) = '05', ...
