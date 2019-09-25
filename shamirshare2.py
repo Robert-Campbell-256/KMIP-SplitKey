@@ -5,8 +5,8 @@
 # Operator overloading is not used, neither is type coercion outside
 # of __init__()
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
-# Date: 22 Sept 2019
-# Version 0.3
+# Date: 25 Sept 2019
+# Version 0.31
 # License: Simplified BSD (see details at bottom)
 ###############################################################################
 
@@ -36,22 +36,22 @@ Usage:  Implement a 3-of-4 KeySplit over GF8
         >>> gf8 = GF8()                 # Create the field GF(2^8)
         ################### Create a new key/secret and split it
         # Choose three random splits: 1-->0x45, 2-->0x41, 3-->0xc3
-        >>> pfit = fit(((gf8(1), gf8('45')), (gf8(2), gf8('41')), (gf8(3), gf8('c3'))))
-        >>> list(map(format, pfit))
+        >>> pfit8 = fit(((gf8(1), gf8('45')), (gf8(2), gf8('41')), (gf8(3), gf8('c3'))))
+        >>> list(map(format, pfit8))     # Coefficients of the polynomial
             ['c7', '34', 'b6']
-        # So poly is (c7 + 34*x + b6*x^2), and secret is pfit(0) = c7
-        >>> format(eval(pfit, gf8(4)))  # Split for user #4
+        # So poly is (c7 + 34*x + b6*x^2), and secret is pfit8(0) = c7
+        >>> format(eval(pfit8, gf8(4)))  # Split for user #4
             '82'
         ################### Now recover secret using splits for users 1, 3, 4
-        >>> pfit2 = fit(((gf8(1), gf8('45')), (gf8(3), gf8('c3')), (gf8(4), gf8('82'))))
-        >>> format(pfit2[0])     # Constant term of pfit2, so value at 0
+        >>> pfit8a = fit(((gf8(1), gf8('45')), (gf8(3), gf8('c3')), (gf8(4), gf8('82'))))
+        >>> format(pfit8a[0])     # Constant term of pfit2, so value at 0
             'c7'
 Usage:  Implement a 3-of-5 KeySplit over GF(2^16)
         >>> gf16 = GF16()                 # Create the field GF(2^8)
         ################### Create a new key/secret and split it
         # Three random splits: 1-->(ab+cd*z), 2-->(11+ab*z), 5-->(1a+2b*z)
         >>> pfit16 = fit(((gf16(1),gf16(["ab","cd"])), (gf16(2),gf16(["11","ab"])), (gf16(5),gf16(["1a","2b"]))))
-        >>> list(map(format, pfit16))
+        >>> list(map(format, pfit16))      # Coefficients of the polynomial
             '[[ab, 34], [c2, 19], [c2, e0], ]'
         >>> print(eval(pfit16, gf16(3)))   # The additional split for user #3
             [11, 52]
@@ -61,23 +61,10 @@ Usage:  Implement a 3-of-5 KeySplit over GF(2^16)
             [ab, 34]
 """
 
-__version__ = '0.3'  # Format specified in Python PEP 396
-Version = 'shamirshare2.py, version ' + __version__ + ', 22 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
+__version__ = '0.31'  # Format specified in Python PEP 396
+Version = 'shamirshare2.py, version ' + __version__ + ', 25 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
 
-import sys     # Check Python2 or Python3
-
-################# Code allowing Python 2 or 3 ################################
-def isStrType(x):
-    if sys.version_info < (3,): return isinstance(x, (basestring,))
-    else: return isinstance(x, (str,))
-
-def isIntType(x):
-    if sys.version_info < (3,): return isinstance(x, (int, long,))
-    else: return isinstance(x, (int,))
-
-def isListType(x):    # List or Tuple: [1,2] or (1,2)
-    return isinstance(x, (list, tuple,))
-
+import six     # Python2/3 compatibility
 
 ############################# Class GFp #################################
 # Class GFp
@@ -128,7 +115,7 @@ class GFpelt(object):
         self.value = value
         if isinstance(value, (GFpelt,)):
             self.value = value.value  # strip redundant GFpelt
-        elif isIntType(value):
+        elif isinstance(value, six.integer_types):
             self.value = self.__normalize(value)
 
     def __normalize(self, value):
@@ -136,14 +123,14 @@ class GFpelt(object):
         return(((value % self.field.prime) + self.field.prime) % self.field.prime)
 
     def __eq__(self, other):  # Implement for Python 2 & 3 with overloading
-        if isIntType(other):
+        if isinstance(other, six.integer_types):
             otherval = self.__normalize(other)
         elif isinstance(other, (GFpelt,)):
             otherval = other.value
         return self.value == otherval
 
     def __ne__(self, other):  # Implement for Python 2 & 3 with overloading
-        if isIntType(other):
+        if isinstance(other, six.integer_types):
             otherval = self.__normalize(other)
         elif isinstance(other, (GFpelt,)):
             otherval = other.value
@@ -154,7 +141,7 @@ class GFpelt(object):
 
     def add(self, summand):
         """add elements of GFpelt (overloaded to allow adding integers)"""
-        if isIntType(summand):
+        if isinstance(summand, six.integer_types):
             summand = self.field(summand)
         elif not isinstance(summand, (GFpelt,)):
             raise NotImplementedError("Can't add GFpelt object to {0:} object".format(type(summand)))
@@ -171,7 +158,7 @@ class GFpelt(object):
 
     def mul(self, multip):  # Elementary multiplication in finite fields
         """multiply elements of GFpelt (overloaded to allow integers)"""
-        if isIntType(multip):  # Coerce if multiplying integer
+        if isinstance(multip, six.integer_types):  # Coerce if multiplying integer
             multip = self.__normalize(multip)
         elif isinstance(multip, (GFpelt,)):
             multip = multip.value
@@ -209,7 +196,7 @@ class GFpelt(object):
 
     def div(self, divisor):
         """divide elements of GFpelt (overloaded to allow integers)"""
-        if isIntType(divisor):  # Coerce if dividing by integer
+        if isinstance(divisor, six.integer_types):  # Coerce if dividing by integer
             divisor = GFpelt(self.field, self.__normalize(divisor))
         elif not isinstance(divisor, (GFpelt,)):
             raise NotImplementedError("Can't divide GFpelt object by {0:} object".format(type(divisor)))
@@ -275,7 +262,7 @@ class GF8elt(object):
         self.field = GF8()
         if isinstance(value, (GF8elt,)): self.value = value.value  # strip redundant GF8elt
         if isinstance(value, (int,)): self.value = value
-        elif isStrType(value): self.value = int(value, 16)  # For the moment, assume hex
+        elif isinstance(value, six.string_types): self.value = int(value, 16)  # For the moment, assume hex
 
     def __eq__(self, other):  # Implement for both Python2 & 3 with overloading
         return self.value == other.value
@@ -314,7 +301,7 @@ class GF8elt(object):
         """convert to integer for various uses including bin, hex and oct (Python 2.5+ only)"""
         return self.value
 
-    if sys.version_info < (3,):  # Overload hex() and oct() (bin() was never backported to Python 2)
+    if six.PY2:  # Overload hex() and oct() (bin() was never backported to Python 2)
         def __hex__(self): return "0x{0:02x}".format(self.value)
         def __oct__(self): return oct(self.__index__())
 
@@ -467,16 +454,16 @@ class GF16elt(object):
         self.field = GF16()
         if isinstance(value, (GF16elt,)):
             self.coeffs = value.coeffs  # strip redundant GF16elt
-        elif isIntType(value) or isStrType(value):
+        elif isinstance(value, six.integer_types) or isinstance(value, six.string_types):
             self.coeffs = [self.field.basefield(value), self.field.basefield(0)]
-        elif isListType(value):
+        elif isinstance(value, (list, tuple,)):
             self.coeffs = [self.field.basefield(thecoeff) for thecoeff in value[:min(2,len(value))]] + [self.field.basefield(0) for i in range(min(2,len(value)), 2)]
         elif (value in self.field.basefield):      # Overload coeffring elt --> constant poly
             self.coeffs = [value, self.field.basefield(0)]
         else: raise ValueError("A GF16elt object cannot be constructed from input \'{0:}\' of type {1:}".format(value,type(value)))
 
     def __eq__(self, other):  # Implement for both Python2 & 3 with overloading
-        if isIntType(other) or isStrType(other) or isinstance(other, (GF8elt,)) or isListType(other):
+        if isinstance(other, six.integer_types) or isinstance(other, six.string_types) or isinstance(other, (GF8elt,)) or isinstance(other, (list, tuple,)):
             otherval = self.field(other)
         elif isinstance(other, (GF16elt,)): otherval = other
         else: raise ValueError("Cannot compare equality of a GF16elt object with \'{0:}\' of type {1:}".format(other,type(other)))
@@ -524,7 +511,7 @@ class GF16elt(object):
         """convert to integer for various uses including bin, hex and oct (Python 2.5+ only)"""
         return (self.coeffs[0]).value + ((self.coeffs[1]).value << 8)
 
-    if sys.version_info < (3,):  # Overload hex() and oct() (bin() was never backported to Python 2)
+    if six.PY2:  # Overload hex() and oct() (bin() was never backported to Python 2)
         def __hex__(self): return "0x{0:04x}".format(self.__index__())
         def __oct__(self): return oct(self.__index__())
 
