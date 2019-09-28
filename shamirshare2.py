@@ -5,8 +5,8 @@
 # Operator overloading is not used, neither is type coercion outside
 # of __init__()
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
-# Date: 25 Sept 2019
-# Version 0.31
+# Date: 27 Sept 2019
+# Version 0.32
 # License: Simplified BSD (see details at bottom)
 ###############################################################################
 
@@ -15,56 +15,70 @@ Possible ground fields include:
     GF(2^8) - GF8, as specified by AES block cipher
     GF(2^16) - GF16, a quadratic extension of GF8
     GF(p) - GFp, for a specified prime p
-Usage:  Implement a 3-of-5 KeySplit over GF(101)
+
+    Usage:  ########## Implement a 3-of-5 KeySplit over GF(101) ###########
+
         >>> from shamirshare2 import *
         >>> gf101 = GFp(101)                 # Create the field GF(101)
-        ################### Create a new key/secret and split it
+
+        ###### Create a new key/secret and split it
         # Choose three random splits: 1-->35, 2-->92, 3-->11
         >>> pfit = fit(((1,35),(2,92),(3,11)),gf101); [pfit[i].value for i in range(3)]
-            [42, 62. 32]
+        [42, 62, 32]
+
         # So poly is (42 + 62*x + 32*x^2), and secret is pfit(0) = 42 (Life, the Universe, ...)
         # Now generate two more splits for users 4 and 5
         >>> [eval(pfit,i).value for i in range(4,6)]
-            [95, 41]
+        [95, 41]
+
         # So the splits are:  1-->35, 2-->92, 3-->11, 4-->95, 5-->41
-        ################### Now recover the secret using splits for users 1, 4 and 5
+        # Now recover the secret using splits for users 1, 4 and 5
         >>> pfit2 = fit(((1,35),(4,95),(5,41)),gf101); [pfit2[i].value for i in range(3)]
-            [42, 62. 32]
+        [42, 62, 32]
         >>> eval(pfit2,0).value         # Evaluate pfit2(0), same as its constant term
-            42
-Usage:  Implement a 3-of-4 KeySplit over GF8
+        42
+
+    Usage:  ########### Implement a 3-of-4 KeySplit over GF8 #############
+
         >>> gf8 = GF8()                 # Create the field GF(2^8)
-        ################### Create a new key/secret and split it
+
+        ###### Create a new key/secret and split it
         # Choose three random splits: 1-->0x45, 2-->0x41, 3-->0xc3
         >>> pfit8 = fit(((gf8(1), gf8('45')), (gf8(2), gf8('41')), (gf8(3), gf8('c3'))))
         >>> list(map(format, pfit8))     # Coefficients of the polynomial
-            ['c7', '34', 'b6']
+        ['c7', '34', 'b6']
+
         # So poly is (c7 + 34*x + b6*x^2), and secret is pfit8(0) = c7
         >>> format(eval(pfit8, gf8(4)))  # Split for user #4
-            '82'
-        ################### Now recover secret using splits for users 1, 3, 4
+        '82'
+
+        ###### Now recover secret using splits for users 1, 3, 4
         >>> pfit8a = fit(((gf8(1), gf8('45')), (gf8(3), gf8('c3')), (gf8(4), gf8('82'))))
         >>> format(pfit8a[0])     # Constant term of pfit2, so value at 0
-            'c7'
-Usage:  Implement a 3-of-5 KeySplit over GF(2^16)
+        'c7'
+
+    Usage:  ########## Implement a 3-of-5 KeySplit over GF(2^16) ##########
+
         >>> gf16 = GF16()                 # Create the field GF(2^8)
-        ################### Create a new key/secret and split it
+
+        ###### Create a new key/secret and split it
         # Three random splits: 1-->(ab+cd*z), 2-->(11+ab*z), 5-->(1a+2b*z)
         >>> pfit16 = fit(((gf16(1),gf16(["ab","cd"])), (gf16(2),gf16(["11","ab"])), (gf16(5),gf16(["1a","2b"]))))
         >>> list(map(format, pfit16))      # Coefficients of the polynomial
-            '[[ab, 34], [c2, 19], [c2, e0], ]'
+        ['[ab, 34]', '[c2, 19]', '[c2, e0]']
         >>> print(eval(pfit16, gf16(3)))   # The additional split for user #3
-            [11, 52]
+        [11, 52]
         >>> print(eval(pfit16, gf16(4)))   # The additional split for user #4
-            [1a, d2]
-        >>> print(eval(pfit16, gf16(0)))   # The resulting split secret
-            [ab, 34]
+        [1a, d2]
+        >>> print(eval(pfit16, gf16(0)))   # The split secret, pfit16(0)
+        [ab, 34]
 """
 
-__version__ = '0.31'  # Format specified in Python PEP 396
-Version = 'shamirshare2.py, version ' + __version__ + ', 25 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
+__version__ = '0.32'  # Format specified in Python PEP 396
+Version = 'shamirshare2.py, version ' + __version__ + ', 27 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
 
-import six     # Python2/3 compatibility
+import six        # Python2/3 compatibility
+import functools  # reduce operator in Python3
 
 ############################# Class GFp #################################
 # Class GFp
@@ -74,12 +88,11 @@ import six     # Python2/3 compatibility
 class GFp(object):
     """A prime field, given some specified prime p
     Usage:
-        >>> from shamirshare import *
         >>> gf250 = GFp(1125899906842679)  # First prime larger than 2^50
         >>> a = gf250(-1); a.value
-            1125899906842678
-        >>> a
-            <shamirshare.GFpelt object at 0x7ff7dd6a52b0>
+        1125899906842678
+        >>> a                              #doctest: +ELLIPSIS
+        <shamirshare2.GFpelt object at 0x...>
     """
 
     def __init__(self, prime):
@@ -100,14 +113,13 @@ class GFpelt(object):
     We assume that there is only a single GFp in play at any time,
     with no attempt to catch attempts to combine elements of distinct fields.
     Usage:
-        >>> from shamirshare import *
         >>> gf250 = GFp(1125899906842679)  # First prime larger than 2^50
         >>> a = gf250(-1); a.value
-            1125899906842678
-        >>> a
-            <shamirshare.GFpelt object at 0x7ff7dd6a52b0>
-        >>> format(gf250(2).mul(a))
-            1125899906842677
+        1125899906842678
+        >>> a                              #doctest: +ELLIPSIS
+        <shamirshare2.GFpelt object at 0x...>
+        >>> gf250(2).mul(a).value          # 2*(-1) mod p
+        1125899906842677
     """
 
     def __init__(self, field, value):
@@ -244,15 +256,19 @@ class GF8elt(object):
     """An element of GF(2^8) as represented in AES
     (driving polynomial x^8 + x^4 + x^3 + x + 1, aka "1b")
     Usage:
-        >>> from shamirshare import *
         >>> a = GF8elt(123)            # Note that decimal '123' is hex 0x7b
-        >>> a                          # Full representation
-            <GF8elt object at 0x7f8daa662e80>
+        >>> a                          #doctest: +ELLIPSIS
+        <shamirshare2.GF8elt object at 0x...>
         >>> "{0:x}".format(a)          # Hex format
-            '7b'
+        '7b'
         >>> b = GF8elt('f5')
         >>> "{0:b}".format(a.add(b))   # Add, output binary: 0x7b xor 0xf5 = 0x8e = 0b10001110
-            '10001110'
+        '10001110'
+        >>> c = GF8elt([1,1,1,0,1,1])
+        >>> "{0:b}".format(c)          # Integer vs list reverses printed bits
+        '00110111'
+        >>> format(c.mul(b),'x')       # Multiply b*c, output in hex
+        'bd'
     """
 
     fmtspec = 'x'  # Default format for GF8 is two hex digits
@@ -261,8 +277,10 @@ class GF8elt(object):
         self.value = 0
         self.field = GF8()
         if isinstance(value, (GF8elt,)): self.value = value.value  # strip redundant GF8elt
-        if isinstance(value, (int,)): self.value = value
+        elif isinstance(value, six.integer_types): self.value = value
         elif isinstance(value, six.string_types): self.value = int(value, 16)  # For the moment, assume hex
+        elif isinstance(value, (list, tuple,)): self.value = functools.reduce(lambda a, x: 2*a + x, reversed(value), 0)
+        else: raise ValueError("A GF8elt object cannot be constructed from input \'{0:}\' of type {1:}".format(value, type(value)))
 
     def __eq__(self, other):  # Implement for both Python2 & 3 with overloading
         return self.value == other.value
@@ -278,12 +296,14 @@ class GF8elt(object):
         Possible formats are:
             b- coefficients as a binary integer
             x- coefficients as a hex integer
-        Example:
-            >>> a = GF8elt([1,1,0,1,1,1])
+
+        Usage:
+
+            >>> a = GF8elt([1,1,1,0,1,1])
+            >>> "{0:b}".format(a)       # Integer vs list reverses bit order
+            '00110111'
             >>> "{0:x}".format(a)
-            '37'
-            >>> "{0:b}".format(a)
-            '00110111'"""
+            '37'"""
         if fmtspec == '': fmtspec = GF8elt.fmtspec  # Default format is hex
         if fmtspec == 'x': return "{0:02x}".format(self.value)
         elif fmtspec == 'b': return "{0:08b}".format(self.value)
@@ -431,18 +451,17 @@ class GF16elt(object):
     finited field used in AES.  GF16elt instances are represented as linear
     polynomials with coefficients in GF8.
     Usage:
-        >>> from shamirshare import *
         >>> a = GF16elt(["ab","cd"])      # (ab) + (cd)*z, where (ab), (cd) are in GF(2^8)
-        >>> a                             # Full representation
-            <GF16elt object at 0x7f797e8512b0>
+        >>> a                             #doctest: +ELLIPSIS
+        <shamirshare2.GF16elt object at 0x...>
         >>> "{0:x}".format(a)    # Hex format (list of GF8 coeffs, each in hex)
-            '[ab, cd]'
+        '[ab, cd]'
         >>> format(a,'p')        # Polynomial format (with coeffs in GF8)
-            '(ab) +  (cd)*z'
-        >>> b = shamirshare.GF16elt(5); format(b)
-            '[05, 00]'
-        >>> format((a * b) + (a.inv() * b))  # Compute (a*b) + (b/a)
-            '[9e, 7c]'
+        '(ab) + (cd)*z'
+        >>> b = GF16elt(5); format(b)
+        '[05, 00]'
+        >>> format((a.mul(b)).add(a.inv().mul(b)))  # Compute (a*b) + (b/a)
+        '[9e, 7c]'
     """
 
     coeffs = []
@@ -483,19 +502,20 @@ class GF16elt(object):
             p - polynomial w/ coeffs in GF8 (default hex)
             px - polynomial w/ coeffs in GF8 in hex
             pb - polynomial w/ coeffs in GF8 in binary
+
         Examples:
-            >>> >>> a = GF16elt(["ab","cd"])
+            >>> a = GF16elt(["ab","cd"])
             >>> format(a)
-                '[ab, cd]'
+            '[ab, cd]'
             >>> format(a,'b')
-                '[10101011, 11001101]'
+            '[10101011, 11001101]'
             >>> "Hex:{0:x}, Binary:{0:b}, Poly:{0:p}".format(a)
-                'Hex:[ab, cd], Binary:[10101011, 11001101], Poly:(ab) + (cd)*z'
+            'Hex:[ab, cd], Binary:[10101011, 11001101], Poly:(ab) + (cd)*z'
             """
         if fmtspec == '': fmtspec = GF16elt.fmtspec  # Default format is hex
         if fmtspec == 'x': return "[{0:x}, {1:x}]".format(self.coeffs[0], self.coeffs[1])
         elif fmtspec == 'b': return "[{0:b}, {1:b}]".format(self.coeffs[0], self.coeffs[1])
-        elif (fmtspec == 'p') or (fmtspec == 'px'): return "({0:x}) +  ({1:x})*{2:}".format(self.coeffs[0], self.coeffs[1], self.field.var)
+        elif (fmtspec == 'p') or (fmtspec == 'px'): return "({0:x}) + ({1:x})*{2:}".format(self.coeffs[0], self.coeffs[1], self.field.var)
         elif fmtspec == 'pb': return "[{0:b}, {1:b}]".format(self.coeffs[0], self.coeffs[1])
         else: raise ValueError("The format string \'{0:}\' doesn't make sense (or isn't implemented) for a GF16elt object".format(fmtspec))
 
