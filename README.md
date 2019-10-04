@@ -4,6 +4,13 @@ Python (and maybe later Rust, maybe even Go) implementation of Shamir Secret Sha
 ## Plans and Progress
 
 Plans:
+   * Add higher level API (i.e. split/recover for full value, not just slice)
+   * Add test suite (started with testdocs)
+   * Write user docs
+   * PyPi (?)
+   * Rewrite in a more conventional language (Rust maybe? Probably not C.  Not COBOL, so don't ask)
+
+Progress:
    * Rewrite and tighten up shamirshare.py as shamirshare2.py (done)
    * Rewrite in a more conventional language (Rust maybe? Probably not C.  Not COBOL, so don't ask)
    
