@@ -5,8 +5,8 @@
 # Operator overloading is not used, neither is type coercion outside
 # of __init__()
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
-# Date: 27 Sept 2019
-# Version 0.32
+# Date: 8 Oct 2019
+# Version 0.33
 # License: Simplified BSD (see details at bottom)
 ###############################################################################
 
@@ -74,8 +74,8 @@ Possible ground fields include:
         [ab, 34]
 """
 
-__version__ = '0.32'  # Format specified in Python PEP 396
-Version = 'shamirshare2.py, version ' + __version__ + ', 27 Sept, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
+__version__ = '0.33'  # Format specified in Python PEP 396
+Version = 'shamirshare2.py, version ' + __version__ + ', 8 Oct, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
 
 import six        # Python2/3 compatibility
 import functools  # reduce operator in Python3
@@ -602,11 +602,20 @@ def __addlists__(list1, list2):
     return returnlist
 
 def fit(thepoints, thefield=None):  # Lagrange Interpolation
-    """Find the unique degree (n-1) polynomial fitting the n presented values,
-    using Lagrange Interpolation.
-    Usage: fit(((gf8(3),gf8('05')),(gf8(2),gf8('f4')),...)) returns a polynomial p such that p(3) = '05', ...
+    """Find the unique degree (n-1) polynomial with coefficients in thefield
+    fitting the n presented values, using Lagrange Interpolation.  If thefield
+    is not specified, use the field the first y value is in.
     Given a list ((x1,y1),(x2,y2),...,(xn,yn)), return the polynomials
-    Sum(j, Prod(i!=j, yj*(x-xi)/(xj-xi)))"""
+    Sum(j, Prod(i!=j, yj*(x-xi)/(xj-xi)))
+    Usage:
+        >>> gf8 = GF8()                 # Create the field GF(2^8)
+        >>> thepoly = fit(((3,'05'),(2,'f4'),(5,'ab')), gf8)
+        >>> # thepoly(X) = 0x5a + 0x93*X + 0x62*X^2
+        >>> print([hex(a.value) for a in thepoly])
+        ['0x5a', '0x93', '0x62']
+        >>> [hex(eval(thepoly,gf8(xval)).value) for xval in [0,3,2,5]]
+        ['0x5a', '0x5', '0xf4', '0xab']
+        >>> # thepoly(0) = '0x5a' is the split secret"""
     if (thefield == None):
         thefield = thepoints[0][1].field      # Field of first y value
     ptslen = len(thepoints)
@@ -627,8 +636,19 @@ def fit(thepoints, thefield=None):  # Lagrange Interpolation
     return thepoly
 
 def eval(poly, xvalue):  # Evaluate poly at given value using Horner's Rule
+    """Evaluate the polynomial at the point x = xvalue.  The polynomial is
+    specified as a list of coefficients in some base field, and xvalue must
+    also be in the same field.  The evaluation is done
+    using Horner's Method.
+    Usage:
+        >>> gf8 = GF8()                 # Create the field GF(2^8)
+        >>> thepoly = fit(((3,'05'),(2,'f4'),(5,'ab')), gf8)
+        >>> [hex(eval(thepoly,gf8(xval)).value) for xval in [0,3,2,5]]
+        ['0x5a', '0x5', '0xf4', '0xab']
+        >>> # thepoly(0) = '0x5a' is the split secret"""
     polydeg = len(poly)-1
     theval = poly[polydeg]
     for theindex in range(polydeg-1, -1, -1):
         theval = theval.mul(xvalue).add(poly[theindex])
     return theval  # Note: Value is in polyring.coeffring, not polyring
+

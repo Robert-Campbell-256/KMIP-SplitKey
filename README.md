@@ -21,7 +21,10 @@ languages and are prone to bugs in any language.
 
 ## Shamirshare2.py
 
-Current status: ver 0.32, 27 Sept 2019:
+Current status: ver 0.33, 8 Oct 2019:
+   * More minor edits to make the comments doctest friendly
+
+ver 0.32, 27 Sept 2019:
    * Minor edits to make the comments doctest friendly
 
 ver 0.31, 25 Sept 2019:
