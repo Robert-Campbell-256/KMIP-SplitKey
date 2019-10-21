@@ -12,7 +12,7 @@ Plans:
 
 Progress:
    * Rewrite and tighten up shamirshare.py as shamirshare2.py (done)
-   * Rewrite in a more conventional language (Rust maybe? Probably not C.  Not COBOL, so don't ask)
+   * Initial test suite deployed (more work needed)
    
 The original implementation (shamirshare.py) works, but was utterly Baroque (good for music, less so for code).
 The rewrite (shamirshare2.py) removes functions not needed for Shamir sharing, removes most operator overloading
