@@ -5,8 +5,9 @@
 # Operator overloading is not used, neither is type coercion outside
 # of __init__()
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
-# Date: 8 Oct 2019
-# Version 0.33
+# Date: 10 Oct 2019
+# Version 0.4
+# Requires Python 2.6+ or Python 3.3+ (maybe others, but ...)
 # License: Simplified BSD (see details at bottom)
 ###############################################################################
 
@@ -74,11 +75,31 @@ Possible ground fields include:
         [ab, 34]
 """
 
-__version__ = '0.33'  # Format specified in Python PEP 396
-Version = 'shamirshare2.py, version ' + __version__ + ', 8 Oct, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
+__version__ = '0.4'  # Format specified in Python PEP 396
+Version = 'shamirshare2.py, version ' + __version__ + ', 10 Oct, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
 
 import six        # Python2/3 compatibility
 import functools  # reduce operator in Python3
+import random     # Random values - use SystemRandom, not default Random
+                  # Consider secrets module for python 3.6+
+
+# Cryptographically strong RNG to generate splits
+shamirsharerand = random.SystemRandom()
+# If repeatable random is needed (e.g. for debugging), instantiate as:
+#    >>> shamirsharerand = random.Random(42) # Or any other fixed seed
+# Python2:
+#    >>> random.seed(seed)
+#    >>> random.randint(1, N)  # Note the start value is 1
+# Python3:
+#    >>> random.seed(seed, version=1) # version seems irrelevant for int seed
+#    >>> int(random.random() * N) + 1
+# To get the same values across Python2 and Python3 for smallish
+# values of N (fails for N=2**100 - need to review Python internals)
+# over at least 10000 steps (could check further if needed)
+# [https://stackoverflow.com/questions/55647936/]
+# [https://github.com/python/cpython/blob/master/Lib/random.py]
+# [https://github.com/python/cpython/blob/2.7/Lib/random.py]
+# [https://github.com/enthought/Python-2.7.3/blob/master/Lib/random.py]??
 
 ############################# Class GFp #################################
 # Class GFp
@@ -124,11 +145,12 @@ class GFpelt(object):
 
     def __init__(self, field, value):
         self.field = field
-        self.value = value
-        if isinstance(value, (GFpelt,)):
-            self.value = value.value  # strip redundant GFpelt
-        elif isinstance(value, six.integer_types):
+        while isinstance(value, (GFpelt,)):
+            value = value.value  # strip redundant GFpelt wrappers
+        if isinstance(value, six.integer_types):
             self.value = self.__normalize(value)
+        else:
+            raise ValueError("A GFpelt object cannot be constructed from input \'{0:}\' of type {1:}".format(value, type(value)))
 
     def __normalize(self, value):
         """Given an integer, return the smallest positive integer which is equivalent mod prime"""
@@ -148,6 +170,9 @@ class GFpelt(object):
             otherval = other.value
         return self.value != otherval
 
+    def __int__(self):
+        """convert to integer"""
+        return self.value
 
     ######################## Addition Operators ###############################
 
@@ -183,7 +208,7 @@ class GFpelt(object):
     def inv(self):
         """inverse of element in GFp"""
         if (self.value == 0): raise ZeroDivisionError("Attempting to invert zero element of GFp")
-        return GFpelt(self.field, GFpelt.__xgcd(self.value,self.field.prime)[1])
+        return GFpelt(self.field, GFpelt.__xgcd(self.value, self.field.prime)[1])
 
     @staticmethod
     def __xgcd(a, b):
@@ -287,6 +312,10 @@ class GF8elt(object):
 
     def __ne__(self, other):  # Implement for both Python2 & 3 with overloading
         return self.value != other.value
+
+    def __int__(self):
+        """convert to integer"""
+        return self.value
 
     ######################## Format Operators #################################
 
@@ -491,6 +520,10 @@ class GF16elt(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
+    def __int__(self):
+        """convert to integer"""
+        return (self.coeffs[0]).value + ((self.coeffs[1]).value << 8)
+
     ######################## Format Operators #################################
 
     def __format__(self, fmtspec):  # Over-ride format conversion
@@ -652,3 +685,99 @@ def eval(poly, xvalue):  # Evaluate poly at given value using Horner's Rule
         theval = theval.mul(xvalue).add(poly[theindex])
     return theval  # Note: Value is in polyring.coeffring, not polyring
 
+################################# SSS Operations ##############################
+# Operations recast as Shamir Secret Sharing operations, rather then algebraic
+# functions.
+###############################################################################
+SplitKeyMethods = {'XOR':1, 'PolynomialSharingGF216':2, 'PolynomialSharingPrimeField':3, 'PolynomialSharingGF28':4}
+
+def __gf8listtoint(thelist):
+    """Convert list of GF8 elements to a single integer
+    using big-endian convention."""
+    return functools.reduce(lambda i,x: (i << 8) | int(x), thelist, 0)
+
+def __gf8inttolist(theint, numbits, thefield):
+    """Convert single integer to list of GF8 elements using big-endian
+    convention.  The list is padded with zeros if theint < 2**numbits."""
+    return list(reversed([thefield((theint >> i) & 0xFF) for i in range(0,numbits,8)]))
+
+def __gf16listtoint(thelist):
+    """Convert list of GF16 elements to a single integer
+    using big-endian convention."""
+    return functools.reduce(lambda i,x: (i << 16) | int(x), thelist, 0)
+
+def __gf16inttolist(theint, numbits, thefield):
+    """Convert single integer to list of GF16 elements using big-endian
+    convention.  The list is padded with zeros if theint < 2**numbits."""
+    return list(reversed([thefield((theint >> i) & 0xFFFF) for i in range(0,numbits,16)]))
+
+# Conversion of GFp to and from int is done with casting (i.e. GFp(int)) and int(gfpval)
+
+def __gf8listtobytearrau(thelist):
+    """Convert list of GF8 elements to a bytes (or str for Python 2) object
+    using big-endian convention."""
+    bytearray([int(x) for x in thegf8list])
+
+def __gf8bytearraytolist(thebytearray, thefield):
+    """Convert bytes (or str for Python 2) object to list of GF8 Elements
+    using big-endian convention."""
+    return [thefield(thebytearray[i]) for i in range(len(thebytearray))]
+
+
+def splitkey(keybits, SplitKeyParts, SplitKeyThreshhold, SplitKeyMethod, key=None, PrimeFieldSize=None):
+    """Return [(1, split(1)), (2, split(2)), ..., (numparts, split(numparts))]
+    Create a new random key of size keybits and split it into SplitKeyParts
+    parts, using the specified method, such that only SplitKeyThreshhold parts
+    are needed to recover the split key.  Optionally, provide the key to be
+    split. if the PolynomialSharingPrimeField method is specified, the prime
+    itself needs to be specified.
+
+    Format of key (if specified) and returned splits are either a single
+    integer (for PrimeField) or a list of 8 or 16-bit integers (for GF28 or GF216)
+    """
+    if SplitKeyMethod==1:
+        raise ValueError("XOR splitting method is not supported (but is trivial to implement)")
+    elif SplitKeyMethod==2: # Split over field GF(2^16)
+        thefield = GF16()
+    elif SplitKeyMethod==3: # Split over field GF(p)
+        if PrimeFieldSize==None: raise ValueError("Must specify PrimeFieldSize")
+        thefield = GFp(PrimeFieldSize)
+        if key==None:
+            thepoly = [thefield(shamirsharerand.randint(0,PrimeFieldSize-1)) for i in range(SplitKeyThreshhold)]
+        else:
+            if not isinstance(key, six.integer_types): raise ValueError("When SplitKeyMethod is 3 (i.e. PolynomialSharingPrimeField), then key (if specified) must be of integer type, not \'{0:}\' of type \'{1:}\'".format(key, type(key)))
+            thepoly = [thefield(key)] + [thefield(shamirsharerand.randint(0,PrimeFieldSize-1)) for i in range(1, SplitKeyThreshhold)]
+        return [(i, eval(thepoly, thefield(i))) for i in range(1, SplitKeyParts+1)]
+    elif SplitKeyMethod==4: # Split over field GF(2^8)
+        thefield = GF8()
+    else:
+        raise ValueError("SplitKeyMethod must be one of: \n   1: 'XOR'\n   2: 'PolynomialSharingGF216'\n   3: 'PolynomialSharingPrimeField' or\n   4: 'PolynomialSharingGF28'\nnot \'{0:}\' of type \'{1:}\'".format(SplitKeyMethod, type(SplitKeyMethod)))
+
+def joinsplitkey(SplitKeyMethod, SplitKeyParts, PrimeFieldSize=None):
+    """Return key
+    Recover a key from the specified SplitKeyParts, using the specified
+    method.  There must be the correct number of SplitKeyParts specified
+    (i.e. SplitKeyThreshhold parts).
+
+    Format of returned key and is either a single integer (for PrimeField)
+    or a list of 8 or 16-bit integers (for GF28 or GF216).  The same format
+    (in a list with the KeyPartID) is used for the SplitKeyParts.
+    """
+    if SplitKeyMethod==1:
+        raise ValueError("XOR splitting method is not supported (but is trivial to implement)")
+    elif SplitKeyMethod==2: # Split over field GF(2^16)
+        thefield = GF16()
+    elif SplitKeyMethod==3: # Split over field GF(p)
+        if PrimeFieldSize==None: raise ValueError("Must specify PrimeFieldSize")
+        thefield = GFp(PrimeFieldSize)
+        return int(fit([(thefield(i), thefield(x)) for (i,x) in SplitKeyParts], thefield=thefield)[0])
+    elif SplitKeyMethod==4: # Split over field GF(2^8)
+        thefield = GF8()
+    else:
+        raise ValueError("SplitKeyMethod must be one of: \n   1: 'XOR'\n   2: 'PolynomialSharingGF216'\n   3: 'PolynomialSharingPrimeField' or\n   4: 'PolynomialSharingGF28'\nnot \'{0:}\' of type \'{1:}\'".format(SplitKeyMethod, type(SplitKeyMethod)))
+
+
+################################ KMIP Operations ##############################
+# Operations recast to follow the requirements of KMIP v2.0 for polynomials
+# split key operations.
+###############################################################################
