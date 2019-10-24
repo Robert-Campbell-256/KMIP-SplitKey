@@ -5,8 +5,8 @@
 # Operator overloading is not used, neither is type coercion outside
 # of __init__()
 # Author: Robert Campbell, <r.campbel.256@gmail.com>
-# Date: 10 Oct 2019
-# Version 0.4
+# Date: 24 Oct 2019
+# Version 0.4 gamma
 # Requires Python 2.6+ or Python 3.3+ (maybe others, but ...)
 # License: Simplified BSD (see details at bottom)
 ###############################################################################
@@ -76,12 +76,14 @@ Possible ground fields include:
 """
 
 __version__ = '0.4'  # Format specified in Python PEP 396
-Version = 'shamirshare2.py, version ' + __version__ + ', 10 Oct, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
+Version = 'shamirshare2.py, version ' + __version__ + ', 24 Oct, 2019, by Robert Campbell, <r.campbel.256@gmail.com>'
 
 import six        # Python2/3 compatibility
 import functools  # reduce operator in Python3
 import random     # Random values - use SystemRandom, not default Random
                   # Consider secrets module for python 3.6+
+import sys     # Check Python2 or Python3
+
 
 # Cryptographically strong RNG to generate splits
 shamirsharerand = random.SystemRandom()
@@ -313,9 +315,6 @@ class GF8elt(object):
     def __ne__(self, other):  # Implement for both Python2 & 3 with overloading
         return self.value != other.value
 
-    def __int__(self):
-        """convert to integer"""
-        return self.value
 
     ######################## Format Operators #################################
 
@@ -520,9 +519,6 @@ class GF16elt(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
-    def __int__(self):
-        """convert to integer"""
-        return (self.coeffs[0]).value + ((self.coeffs[1]).value << 8)
 
     ######################## Format Operators #################################
 
@@ -689,7 +685,6 @@ def eval(poly, xvalue):  # Evaluate poly at given value using Horner's Rule
 # Operations recast as Shamir Secret Sharing operations, rather then algebraic
 # functions.
 ###############################################################################
-SplitKeyMethods = {'XOR':1, 'PolynomialSharingGF216':2, 'PolynomialSharingPrimeField':3, 'PolynomialSharingGF28':4}
 
 def __gf8listtoint(thelist):
     """Convert list of GF8 elements to a single integer
@@ -713,16 +708,36 @@ def __gf16inttolist(theint, numbits, thefield):
 
 # Conversion of GFp to and from int is done with casting (i.e. GFp(int)) and int(gfpval)
 
-def __gf8listtobytearrau(thelist):
-    """Convert list of GF8 elements to a bytes (or str for Python 2) object
-    using big-endian convention."""
-    bytearray([int(x) for x in thegf8list])
+def __gf8listtobytearray(thelist):
+    """Convert list of GF8 elements to a bytearray object using
+    big-endian convention."""
+    bytearray([int(x) for x in thelist])
 
 def __gf8bytearraytolist(thebytearray, thefield):
-    """Convert bytes (or str for Python 2) object to list of GF8 Elements
-    using big-endian convention."""
+    """Convert bytearray object to list of GF8 elements using
+    big-endian convention."""
     return [thefield(thebytearray[i]) for i in range(len(thebytearray))]
 
+def __gf16listtobytearray(thelist):
+    """Convert list of GF16 elements to a bytearray object using
+    big-endian convention."""
+    return bytearray([a for b in [(hex(int(x)>>8), hex(int(x)&0xFF)) for x in thelist] for a in b])
+
+def __gf16bytearraytolist(thebytearray, thefield):
+    """Convert bytearray object to list of GF16 elements using
+    big-endian convention."""
+    return [thefield([thebytearray[i+1], thebytearray[i]]) for i in range(len(thebytearray)//2)]
+
+def __gfpbytearraytoint(thebytearray, thefield):
+    """Convert bytearray object to a GFp object using big-endian convention."""
+    if sys.version_info < (3,): return thefield(reduce(lambda x,y: int(y)+256*x, thebytearray))
+    else: return thefield(int.from_bytes(thebytearray, byteorder='big'))
+
+def __gfpinttobytearray(theint, numbits):
+    """Convert bytearray object to a GFp object using big-endian convention."""
+    return bytearray(list(reversed([((theint >> i) & 0xFF) for i in range(0,numbits,8)])))
+
+SplitKeyMethods = {'XOR':1, 'PolynomialSharingGF216':2, 'PolynomialSharingPrimeField':3, 'PolynomialSharingGF28':4}
 
 def splitkey(keybits, SplitKeyParts, SplitKeyThreshhold, SplitKeyMethod, key=None, PrimeFieldSize=None):
     """Return [(1, split(1)), (2, split(2)), ..., (numparts, split(numparts))]
